@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## 2.1.0 — 2026-09-12 (sessão 3)
+
+### Adicionado
+- **Frontend rebuilt (Dala dark-void)**: canvas preto puro, violeta #8052ff só em botões,
+  body ultra-light (200), tipografia escala>peso, sem sombras/cards — partículas ambiente,
+  constelação hero, **grafo de agentes ao vivo** (canvas), **flowchart do pipeline** com
+  pulso em eventos, legend por provider
+- **DialKit 2.0.2** (vanilla, vendored em `web/vendor/`): painel de tuning ao vivo
+  (accent, velocidade da malha, glow) com persistência
+- **TokenRouter** no router chain (free `z-ai/glm-5.3-free`) + **NVIDIA NIM** free;
+  ordem: OmniRoute → TokenRouter → NVIDIA → AIsa → slot 9route; Hermes config
+  apontada pro TokenRouter com OmniRoute/NVIDIA como alternativas
+- **AWS deploy kit** (`deploy/AWS_DEPLOY.md`): CLI v2.36.43 no-admin instalado,
+  profile `football-blitz` (us-east-2), `tools/aws_login.bat` one-click, receita EC2
+  t4g.small free-tier
+- **GitHub**: primeiro push do projeto → `Victor-Enginner/Football-Blitz-Card-cassino`
+
+### Corrigido
+- `game.py`: leitura de saldo tolerante a settle concorrente (`float(None)` 500)
+- Rota `/vendor/dialkit/*` adicionada ao server (404 dos assets vendored)
+
+### Removido
+- **Purga total do bot de roleta**: todo o projeto antigo movido a `ARENA_TOMBSTONE/`
+  (com MANIFEST.txt + `tools/purge_tombstone.sh` p/ deleção final); apenas
+  `PLANO_FOOTBALL_BLITZ.md` preservado em `docs_reference/`
+
+### Honest eval
+- **VoltAgent** (MIT, TypeScript): observability-first, bom sidecar futuro; não integrado
+  agora — Hermes+router já cobrem o papel; avaliar quando houver orquestração multi-agente
+
 ## 2.0.0 — 2026-09-11 (sessão 2)
 
 ### Adicionado

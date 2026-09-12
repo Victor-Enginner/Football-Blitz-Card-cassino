@@ -78,9 +78,23 @@ Estados de operação: `OFFLINE → PAPER → MANUAL_REVIEW → COOLDOWN → STO
 
 ## Roteamento de IA
 
-Primário: **OmniRoute** (`OMNIROUTE_BASE_URL`, modelo `auto` = combo virtual com
-fallback entre todos os providers conectados). Fallback opcional: slot genérico
-OpenAI-compatible — ative com:
+Cadeia free-first, **fail-closed** (sem resposta fabricada):
+
+1. **OmniRoute** — gateway local `localhost:20128`, modelo `auto` (combo virtual)
+2. **TokenRouter** — free tier, `z-ai/glm-5.3-free` (`TOKENROUTER_API_KEY`)
+3. **NVIDIA NIM** — free tier, `meta/llama-3.3-70b-instruct` (`NVIDIA_API_KEY`, build.nvidia.com)
+4. **AIsa** — pago, verificado (`AISA_API_KEY`)
+5. **Slot genérico** — para 9route ou outro endpoint OpenAI-compatible:
+
+```env
+GENERIC_PROVIDER_ENABLED=true
+GENERIC_PROVIDER_BASE_URL=https://seu-endpoint-verificado
+GENERIC_PROVIDER_MODEL=modelo
+GENERIC_PROVIDER_API_KEY=...
+```
+
+> 9route permanece **não verificado** (sem repositório oficial confirmado).
+> Configure o slot somente após validar origem/licença/commit.
 
 ```env
 GENERIC_PROVIDER_ENABLED=true
@@ -101,7 +115,7 @@ command-center/
 ├── policy.py          # travas, estados, cooldown
 ├── rag.py             # RAG TF-IDF + provenance
 ├── compression.py     # compressão RTK-style
-├── router.py          # OmniRoute + slot genérico (fail-closed)
+├── router.py          # OmniRoute → TokenRouter → NVIDIA → AIsa → slot (fail-closed)
 ├── copilot.py         # IA governada (schema + tom + redaction)
 ├── config.py          # env-only, sem segredos no código
 ├── test_command_center.py
