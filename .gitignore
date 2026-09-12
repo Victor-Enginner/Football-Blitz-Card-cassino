@@ -1,0 +1,16 @@
+# secrets — NEVER commit
+.env
+
+# local dev data
+data/
+*.db
+*.sqlite*
+
+# python
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# logs / temp
+*.log
+/tmp/

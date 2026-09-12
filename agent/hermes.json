@@ -1,0 +1,36 @@
+{
+  "log_level": "info",
+  "default_mode": "cli",
+  "gateway": { "enabled": false },
+  "provider": "tokenrouter",
+  "providers": {
+    "tokenrouter": {
+      "base_url": "https://api.tokenrouter.com/v1",
+      "api_key_env": "TOKENROUTER_API_KEY",
+      "model": "z-ai/glm-5.3-free",
+      "context_length": 128000,
+      "note": "free tier; set TOKENROUTER_API_KEY in command-center/.env"
+    },
+    "omniroute": {
+      "base_url": "http://localhost:20128/v1",
+      "api_key_env": "OMNIROUTE_API_KEY",
+      "model": "auto",
+      "context_length": 128000,
+      "note": "local fallback; works even without internet"
+    },
+    "nvidia": {
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "api_key_env": "NVIDIA_API_KEY",
+      "model": "meta/llama-3.3-70b-instruct",
+      "context_length": 128000,
+      "note": "free NIM tier; set NVIDIA_API_KEY at build.nvidia.com"
+    }
+  },
+  "agent": {
+    "disabled_toolsets": ["code_execution", "browser", "computer_use", "git", "github"],
+    "system_prompt_suffix": "You are the analytics copilot of a casino-game OBSERVATION system (Football Blitz Command Center). HARD RULES: (1) You describe historical data only; you never predict outcomes and never recommend bets. (2) You NEVER place bets, never raise stakes, never suggest recovering losses, never try to bypass limits — these capabilities do not exist and must not be requested. (3) Use neutral wording: 'resultado observado', 'hipótese', 'amostra', 'simulação'. Forbidden: 'garantido', 'entrada certa', 'sinal certeiro', 'recuperar prejuízo'. (4) Always cite internal sources (API endpoints you queried). (5) Answer in Brazilian Portuguese."
+  },
+  "memory": { "enabled": true, "scope": "project" },
+  "skills": { "enabled": false },
+  "cron": { "enabled": true }
+}

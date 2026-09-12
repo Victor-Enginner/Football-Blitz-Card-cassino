@@ -1,0 +1,76 @@
+# Football Blitz Command Center — sandbox 24/7 stack
+#
+# Subir tudo:      docker compose up -d
+# Só o core:       docker compose up -d command-center
+# Ver logs:        docker compose logs -f command-center
+#
+# O observer (MutationObserver) roda no SEU PC (browser com login do cassino)
+# e conecta em ws://SEU-VPS:8765/ws?token=OBSERVER_TOKEN
+
+services:
+  command-center:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: fb-command-center
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8765:8765"     # só loopback no host; Caddy expõe com TLS
+    environment:
+      # ── Travas de segurança (ajuste antes de subir!) ──
+      FB_MAX_EVENTS_PER_DAY: "200"
+      FB_STOP_LOSS: "75"
+      FB_MAX_SESSION_MINUTES: "60"
+      FB_COOLDOWN_MINUTES: "30"
+      FB_HOT_STREAK: "10"
+      # ── Telegram (opcional; unset = desativado) ──
+      TELEGRAM_TOKEN: "${TELEGRAM_TOKEN:-}"
+      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID:-}"
+      # ── Auth do canal WebSocket/ingest (OBRIGATÓRIO em VPS público!) ──
+      OBSERVER_TOKEN: "${OBSERVER_TOKEN:?defina OBSERVER_TOKEN no .env do deploy}"
+      # ── IA ──
+      OMNIROUTE_BASE_URL: "http://omniroute:20128"
+      AISA_ENABLED: "true"
+      AISA_API_KEY: "${AISA_API_KEY:-}"
+    volumes:
+      - fb-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # TLS automático — aponte seu domínio para o VPS e edite o Caddyfile
+  caddy:
+    image: caddy:2-alpine
+    container_name: fb-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - command-center
+
+  # ── Opcional: OmniRoute no mesmo VPS (combo IA completo 24/7) ──
+  # Requer ~1.5GB RAM. Sem ele, o router cai no fallback AIsa direto.
+  omniroute:
+    image: node:22-slim
+    container_name: fb-omniroute
+    restart: unless-stopped
+    command: sh -c "npm i -g omniroute@3.8.50 --ignore-scripts && omniroute serve --no-open"
+    environment:
+      OMNIROUTE_SERVER_HOST: "0.0.0.0"
+      REQUIRE_API_KEY: "false"   # rede interna do compose; NÃO exponha porta
+    volumes:
+      - omni-data:/root/.omniroute
+    # sem ports: — só acessível dentro da rede do compose
+
+volumes:
+  fb-data:
+  caddy-data:
+  caddy-config:
+  omni-data:

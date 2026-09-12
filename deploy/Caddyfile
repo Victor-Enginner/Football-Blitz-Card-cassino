@@ -1,0 +1,6 @@
+# Caddyfile — TLS automático para o Command Center
+# Troque dashboard.seudominio.com pelo seu domínio apontado ao VPS.
+
+dashboard.seudominio.com {
+    reverse_proxy command-center:8765
+}
