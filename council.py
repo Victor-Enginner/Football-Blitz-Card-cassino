@@ -30,22 +30,58 @@ from config import (
 # LLM access — same fail-closed chain as router.py, exposed to deepagents.
 # ---------------------------------------------------------------------------
 
+_LLM_CACHE: list = []
+
+
 def _build_llm():
-    """Point the council LLM at our free-first chain (OmniRoute local first)."""
+    """Council LLM: OmniRoute if its gateway answers, else NVIDIA NIM free.
+    Cached after the first successful probe (fail-closed if neither works)."""
+    if _LLM_CACHE:
+        return _LLM_CACHE[0]
     try:
         from langchain_openai import ChatOpenAI
     except Exception:  # pragma: no cover - optional dependency
         return None
-    key = os.getenv("OMNIROUTE_API_KEY", "").strip() or "local"
-    llm = ChatOpenAI(
-        model=OMNIROUTE_MODEL,
-        base_url=f"{OMNIROUTE_BASE_URL}/v1",
-        api_key=key,
-        temperature=0.2,
-        timeout=90,
-        max_retries=1,
-    )
-    return llm
+
+    def _omni():
+        return ChatOpenAI(
+            model=OMNIROUTE_MODEL,
+            base_url=f"{OMNIROUTE_BASE_URL}/v1",
+            api_key=os.getenv("OMNIROUTE_API_KEY", "").strip() or "local",
+            temperature=0.2, timeout=90, max_retries=1,
+        )
+
+    # probe the local gateway with a real 1-token chat — /v1/models can return
+    # 200 while its upstream credentials are dead
+    try:
+        llm = _omni()
+        llm.invoke([{"role": "user", "content": "ping"}])
+        _LLM_CACHE.append(llm)
+        return llm
+    except Exception:
+        pass
+
+    # NVIDIA NIM free fallback
+    nvidia_key = os.getenv("NVIDIA_API_KEY", "").strip()
+    if nvidia_key:
+        try:
+            llm = ChatOpenAI(
+                model=os.getenv("NVIDIA_MODEL", "openai/gpt-oss-20b"),
+                base_url=f"{os.getenv('NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com').rstrip('/')}/v1",
+                api_key=nvidia_key,
+                temperature=0.2, timeout=90, max_retries=1,
+            )
+            _LLM_CACHE.append(llm)
+            return llm
+        except Exception:
+            pass
+
+    try:
+        llm = _omni()  # last resort; calls will fail and roles fail closed
+        _LLM_CACHE.append(llm)
+        return llm
+    except Exception:
+        return None
 
 
 SYSTEM_RULES = """You are a member of the governed AI council of the Football Blitz

@@ -83,13 +83,25 @@
       if (["home", "away", "draw", "empate", "casa", "fora"].includes(t)) {
         return t === "empate" ? "draw" : t === "casa" ? "home" : t === "fora" ? "away" : t;
       }
-      // card values: "H 7", "A K", "7 x 9"…
-      const m = t.match(/^([ha])\s*([2-9jqka]|10|1[0-3])$/i) ||
-                t.match(/^([2-9jqka]|10|1[0-3])\s*[x×]\s*([2-9jqka]|10|1[0-3])$/i);
-      if (!m) return null;
-      const cardVal = (c) => ({ j: 11, q: 12, k: 13, a: 1 }[c.toLowerCase()] ?? parseInt(c, 10));
-      if (m.length === 3 && m[1].toLowerCase() === "h") return null; // handled by caller
-      return null; // card-level extraction is game-specific; log raw for triage
+      // card values: "H 7", "A K", "7 x 9", "Kx7"… (A=1 low, J=11 Q=12 K=13)
+      const cardVal = (c) => {
+        c = c.toLowerCase();
+        if (c === "j") return 11; if (c === "q") return 12;
+        if (c === "k") return 13; if (c === "a") return 1;
+        const n = parseInt(c, 10);
+        return (n >= 2 && n <= 10) ? n : NaN;
+      };
+      // "H 7 / A 9" ou "H:K A:7"
+      let m = t.match(/h\s*[:\s]\s*([2-9jqka]|10).*?a\s*[:\s]\s*([2-9jqka]|10)/i);
+      // "7 x 9" / "K×7"
+      if (!m) m = t.match(/([2-9jqka]|10)\s*[x×]\s*([2-9jqka]|10)/i);
+      if (m) {
+        const hv = cardVal(m[1]), av = cardVal(m[2]);
+        if (isNaN(hv) || isNaN(av)) return null;
+        return { outcome: hv > av ? "home" : av > hv ? "away" : "draw",
+                 homeCard: m[1].toUpperCase(), awayCard: m[2].toUpperCase() };
+      }
+      return null; // texto não mapeado: log raw p/ triagem
     }
 
     function readNewResults(mutations) {
@@ -100,16 +112,18 @@
         const node = nodes[0]; // most recent result
         const text = (node.textContent || "").trim();
         if (!text || text === lastOutcome) return;
-        const outcome = extractOutcome(text);
-        console.info("[fb-observer] novo resultado bruto:", text, "→", outcome || "(não mapeado)");
+        const parsed = extractOutcome(text);
+        console.info("[fb-observer] novo resultado bruto:", text, "→", parsed ? parsed.outcome : "(não mapeado)");
         lastOutcome = text;
-        if (outcome) {
+        if (parsed) {
+          const outcome = typeof parsed === "string" ? parsed : parsed.outcome;
           const ok = send({
             kind: "outcome",
             outcome,
+            home_card: parsed.homeCard, away_card: parsed.awayCard,
             observed_at: new Date().toISOString(),
             raw: text.slice(0, 40),
-            parser_version: "fb-mutation-1.0",
+            parser_version: "fb-mutation-2.0",
           });
           console.info(`[fb-observer] enviado: ${outcome} (${ok ? "ok" : "ws fechado"})`);
         }

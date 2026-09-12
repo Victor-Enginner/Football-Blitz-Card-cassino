@@ -137,14 +137,33 @@ class Copilot:
             }
 
         raw = result.content.strip()
-        # extract JSON object even if wrapped in ```json fences
-        m = re.search(r"\{.*\}", raw, re.DOTALL)
-        if not m:
-            return self._reject("AI output had no JSON object", comp_report)
-        try:
-            obj = json.loads(m.group(0))
-        except json.JSONDecodeError:
-            return self._reject("AI output was not valid JSON", comp_report)
+        # extract JSON object even if wrapped in ```json fences; one retry —
+        # small free models occasionally answer non-JSON (e.g. bare "None")
+        # or drop required schema fields
+        obj = None
+        reason = "AI output had no JSON object"
+        for attempt in range(2):
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
+            parsed = None
+            if m:
+                try:
+                    parsed = json.loads(m.group(0))
+                except json.JSONDecodeError:
+                    reason = "AI output was not valid JSON"
+            if parsed is not None:
+                if validate_output(parsed) is not None:
+                    obj = parsed
+                    break
+                reason = "AI output failed schema validation — discarded"
+            if attempt == 0:
+                retry = route_chat(messages, temperature=0.1, max_tokens=800)
+                if retry.ok:
+                    raw = retry.content.strip()
+                    continue
+            break
+
+        if obj is None:
+            return self._reject(reason, comp_report)
 
         validated = validate_output(obj)
         if validated is None:

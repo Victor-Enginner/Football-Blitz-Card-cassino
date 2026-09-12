@@ -12,7 +12,26 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.getenv("FB_DATA_DIR", BASE_DIR / "data"))
 DB_PATH = DATA_DIR / os.getenv("FB_DB_NAME", "command_center.db")
 
-# --- AI gateway (OmniRoute primary) -----------------------------------------
+# --- 9Router (roteador local unificado — PRIMARY) ----------------------------
+# 9Router = 1 endpoint OpenAI-compatible (http://localhost:20128/v1) que
+# roteia p/ 60+ providers com fallback 3-tier + RTK/Caveman (20-65% menos tokens).
+# Instale: npm i -g 9router  →  9router start  (dashboard em :20128/dashboard)
+# O processo é leve (~100-200MB); a inferência é 100% nuvem (nada de GPU local).
+NINEROUTER_ENABLED = os.getenv("NINEROUTER_ENABLED", "true").lower() in ("1", "true", "yes")
+NINEROUTER_BASE_URL = os.getenv("NINEROUTER_BASE_URL", "http://localhost:20128").rstrip("/")
+NINEROUTER_MODEL = os.getenv("NINEROUTER_MODEL", "auto")
+NINEROUTER_TIMEOUT_S = float(os.getenv("NINEROUTER_TIMEOUT_S", "60"))
+NINEROUTER_API_KEY = os.getenv("NINEROUTER_API_KEY", "").strip()  # vazio = sem auth local
+NINEROUTER_HEALTH = {"enabled": True, "base_url": NINEROUTER_BASE_URL, "model": NINEROUTER_MODEL}
+
+# --- Cache de respostas LLM (economia real: repetição = 0 tokens) -------------
+LLM_CACHE_ENABLED = os.getenv("FB_LLM_CACHE", "true").lower() in ("1", "true", "yes")
+LLM_CACHE_TTL_S = int(os.getenv("FB_LLM_CACHE_TTL", "3600"))
+LLM_USAGE_LOG = os.getenv("FB_LLM_USAGE_LOG", "llm_usage.jsonl")  # observabilidade
+
+# Explicit opt-in until a remote free provider is configured and validated.
+# User preference: no Ollama/local inference and no implicit paid fallback.
+# --- AI gateway (9Router primary; OmniRoute legado opcional) -------------------
 # Explicit opt-in until a remote free provider is configured and validated.
 # User preference: no Ollama/local inference and no implicit paid fallback.
 REMOTE_LLM_ENABLED = os.getenv("FB_REMOTE_LLM_ENABLED", "false").lower() in ("1", "true", "yes")
@@ -38,7 +57,7 @@ TOKENROUTER_API_KEY = os.getenv("TOKENROUTER_API_KEY", "").strip()
 # --- NVIDIA NIM (free tier, OpenAI-compatible; integrate.api.nvidia.com) -------
 NVIDIA_ENABLED = os.getenv("NVIDIA_ENABLED", "true").lower() in ("1", "true", "yes")
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com").rstrip("/")
-NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct")
+NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "openai/gpt-oss-20b")
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
 
 # --- Generic provider slot (for 9route or any verified OpenAI-compatible API) --

@@ -25,6 +25,8 @@ from copilot import Copilot
 from realtime import broadcaster
 from game import GameEngine
 from telegram_notify import notifier
+from entry_validation import validate_outcome, validate_bet_entry
+from entry_dedup import dedup_check, confirm_two_step, fingerprint
 
 app = FastAPI(title="Football Blitz Command Center", version="2.0.0")
 
@@ -159,12 +161,14 @@ class CopilotIn(BaseModel):
 
 @app.get("/api/health")
 def health():
+    from config import NINEROUTER_HEALTH
     chain = db.verify_chain()
     ok = all(chain.values())
     return {
         "status": "ok" if ok else "TAMPERED",
         "chain_integrity": chain,
         "omniroute": OMNIROUTE_HEALTH,
+        "ninerouter": NINEROUTER_HEALTH,
     }
 
 
@@ -228,6 +232,17 @@ def add_event(body: EventIn):
     if not check["allowed"]:
         db.audit("event_blocked", "; ".join(check["reasons"]))
         raise HTTPException(423, {"error": "blocked by policy", "reasons": check["reasons"]})
+    # VALIDACAO: outcome real precisa ser home/away/draw (normaliza alias)
+    try:
+        body.outcome = validate_outcome(body.outcome)
+    except ValueError as e:
+        db.audit("event_rejected", f"outcome inválido: {body.outcome!r}")
+        raise HTTPException(422, str(e))
+    # DEDUP: ignora leitura duplicada do observer (mesmo raw+parser em 120s)
+    raw = (body.metadata or {}).get("raw", "") or body.outcome
+    if dedup_check(raw, body.round_id or "manual", ):
+        db.audit("event_duplicate", f"outcome duplicado ignorado: {body.outcome}")
+        raise HTTPException(409, "duplicate outcome ignored")
     try:
         result = db.append_event(
             session_id=body.session_id,
@@ -280,14 +295,27 @@ async def ws_endpoint(ws: WebSocket, token: str | None = Query(default=None)):
             kind = msg.get("kind")
             if kind == "outcome":
                 # observer bridge: read-only DOM result (origin=authorized_readonly)
+                # VALIDACAO REAL: normaliza outcome + dedup + confirmação dupla.
+                try:
+                    outcome = validate_outcome(str(msg.get("outcome", "")))
+                except ValueError:
+                    continue  # lixo do DOM nunca entra no ledger
+                raw = str(msg.get("raw", "") or outcome)[:40]
+                parser = msg.get("parser_version", "observer-1.0")
+                if dedup_check(raw, parser):
+                    continue  # leitura repetida do MutationObserver
+                conf = confirm_two_step(msg.get("round_id"), outcome)
+                if not conf["confirmed"]:
+                    continue  # aguarda 2ª leitura igual (anti-fantasma)
                 try:
                     db.append_event(
                         session_id="observer-bridge-01",
                         observed_at=msg.get("observed_at") or datetime.now(timezone.utc).isoformat(),
-                        outcome=str(msg.get("outcome", ""))[:40],
+                        outcome=outcome,
                         data_origin="authorized_readonly",
-                        parser_version=msg.get("parser_version", "observer-1.0"),
-                        metadata={"raw": msg.get("raw", "")[:40]},
+                        parser_version=parser,
+                        round_id=msg.get("round_id"),
+                        metadata={"raw": raw},
                     )
                     ev = db.last_events(1)[0]
                     broadcaster.broadcast("event", {"event": ev})
@@ -320,13 +348,24 @@ def ingest(body: IngestIn, token: str | None = None):
     accepted, rejected = 0, []
     for item in body.outcomes[:20]:
         try:
+            outcome = validate_outcome(item["outcome"])
+            raw = str((item.get("metadata", {}) or {}).get("raw", "") or outcome)[:40]
+            parser = item.get("parser_version", "observer-1.0")
+            if dedup_check(raw, parser):
+                rejected.append(f"duplicate: {outcome}")
+                continue
+            conf = confirm_two_step(item.get("round_id"), outcome)
+            if not conf["confirmed"]:
+                rejected.append(f"unconfirmed (aguardando 2a leitura): {outcome}")
+                continue
             db.append_event(
                 session_id=item.get("session_id") or "observer-bridge-01",
                 observed_at=item["observed_at"],
-                outcome=item["outcome"],
+                outcome=outcome,
                 data_origin="authorized_readonly",
-                parser_version=item.get("parser_version", "observer-1.0"),
-                metadata=item.get("metadata", {}),
+                parser_version=parser,
+                round_id=item.get("round_id"),
+                metadata={**(item.get("metadata", {}) or {}), "raw": raw},
             )
             accepted += 1
         except (ValueError, KeyError) as e:
@@ -360,13 +399,15 @@ def game_bet(body: BetIn):
     if not active:
         raise HTTPException(409, "no active session — start one first")
     check = policy.check(active["session_id"])
-    if not check["allowed"]:
-        notifier.blocked(check["reasons"])
-        raise HTTPException(423, {"error": "blocked by policy", "reasons": check["reasons"]})
-    if body.bet_type not in ("home", "away", "draw", "spread_h", "spread_a"):
-        raise HTTPException(422, f"bet_type must be one of home/away/draw/spread_h/spread_a")
+    # VALIDACAO REAL da entrada (portão único): tipo, stake, banca, policy
+    gate = validate_bet_entry(body.bet_type, body.stake, game.balance(),
+                              check["allowed"], check["reasons"])
+    if not gate["ok"]:
+        db.audit("paper_bet_rejected", "; ".join(gate["reasons"]))
+        notifier.blocked(gate["reasons"]) if notifier.enabled else None
+        raise HTTPException(422, {"error": "entrada rejeitada", "reasons": gate["reasons"]})
     try:
-        bet = game.open_bet(active["session_id"], body.bet_type, body.stake)
+        bet = game.open_bet(active["session_id"], body.bet_type, gate["stake"])
     except ValueError as e:
         raise HTTPException(422, str(e))
     db.audit("paper_bet_opened", f"{body.bet_type} R$ {body.stake:.2f}")
@@ -408,6 +449,72 @@ def simulate(shoes: int = 50, mode: str = "flat_home"):
         "pnl": round(pnl, 2), "pnl_per_bet": round(pnl / max(1, bets_made), 4),
         "note": "simulação descritiva (8 baralhos, reshuffle ~50%); não prevê o futuro",
     }
+
+
+@app.get("/api/llm/status")
+def llm_status():
+    """Diagnóstico da infra LLM: 9Router vivo? quais fallbacks têm chave?"""
+    import socket
+    from urllib.parse import urlparse
+    from config import (
+        REMOTE_LLM_ENABLED, NINEROUTER_BASE_URL, NINEROUTER_MODEL,
+        TOKENROUTER_ENABLED, TOKENROUTER_API_KEY, TOKENROUTER_MODEL,
+        NVIDIA_ENABLED, NVIDIA_API_KEY, NVIDIA_MODEL,
+        AISA_ENABLED, AISA_API_KEY, AISA_MODEL,
+        GENERIC_PROVIDER_ENABLED, GENERIC_PROVIDER_BASE_URL,
+        GENERIC_PROVIDER_MODEL, GENERIC_PROVIDER_NAME,
+        COMPRESSION_ENABLED, LLM_CACHE_ENABLED,
+    )
+
+    def _ping(url: str) -> dict:
+        try:
+            host = urlparse(url).hostname or "localhost"
+            port = urlparse(url).port or 80
+            s = socket.create_connection((host, port), timeout=3)
+            s.close()
+            return {"reachable": True}
+        except OSError as e:
+            return {"reachable": False, "error": str(e)[:120]}
+
+    return {
+        "remote_enabled": REMOTE_LLM_ENABLED,
+        "compression": COMPRESSION_ENABLED,
+        "cache": LLM_CACHE_ENABLED,
+        "primary": {"name": "9router", "model": NINEROUTER_MODEL,
+                    **_ping(NINEROUTER_BASE_URL)},
+        "fallbacks": [
+            {"name": "tokenrouter", "model": TOKENROUTER_MODEL,
+             "has_key": bool(TOKENROUTER_API_KEY), "on": TOKENROUTER_ENABLED},
+            {"name": "nvidia", "model": NVIDIA_MODEL,
+             "has_key": bool(NVIDIA_API_KEY), "on": NVIDIA_ENABLED},
+            {"name": "aisa", "model": AISA_MODEL,
+             "has_key": bool(AISA_API_KEY), "on": AISA_ENABLED},
+            {"name": GENERIC_PROVIDER_NAME, "model": GENERIC_PROVIDER_MODEL,
+             "has_key": bool(GENERIC_PROVIDER_BASE_URL),
+             "on": GENERIC_PROVIDER_ENABLED},
+        ],
+    }
+
+
+@app.get("/api/llm/usage")
+def llm_usage(n: int = 50):
+    """Observabilidade: últimas N chamadas LLM (provider, latência, cache)."""
+    from config import DATA_DIR, LLM_USAGE_LOG
+    from pathlib import Path as _P
+    p = _P(LLM_USAGE_LOG)
+    if not p.is_absolute():
+        p = DATA_DIR / p.name
+    if not p.exists():
+        return {"calls": []}
+    lines = p.read_text(encoding="utf-8").strip().splitlines()[-max(1, min(n, 500)):]
+    import json as _j
+    calls = []
+    for ln in lines:
+        try:
+            calls.append(_j.loads(ln))
+        except ValueError:
+            continue
+    return {"calls": calls[-max(1, min(n, 500)):]}
 
 
 @app.get("/api/events")
