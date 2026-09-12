@@ -77,8 +77,9 @@ async function refreshState() {
     if ($("state-pill")) $("state-pill").textContent = s.state;
     if ($("hero-session")) $("hero-session").textContent = s.session ? `${s.session.session_id.slice(0, 12)}…` : "—";
     if ($("hero-event-budget")) $("hero-event-budget").textContent = `${u.events_today} / ${u.daily_limit}`;
-    if ($("hero-ai-status")) $("hero-ai-status").textContent = s.state === "OFFLINE" ? "STANDBY" : "ROUTED";
+    if ($("hero-ai-status")) $("hero-ai-status").textContent = s.state === "OFFLINE" ? "STANDBY" : "CONECTADO";
     document.body.dataset.state = s.state;
+    document.body.dataset.neuralActive = String(s.state === "PAPER" && s.check.allowed === true);
     $("lim-events").textContent = `${u.events_today} / ${u.daily_limit}`;
     const pct = Math.min(100, (u.events_today / Math.max(1, u.daily_limit)) * 100);
     const bar = $("lim-bar");
@@ -95,7 +96,7 @@ async function refreshState() {
     const br = $("block-reasons");
     if (reasons.length) {
       br.hidden = false;
-      br.innerHTML = reasons.map(r => `⛔ ${r}`).join("<br>");
+      br.innerHTML = reasons.map(r => `⛔ ${escapeHtml(r)}`).join("<br>");
     } else { br.hidden = true; }
     document.querySelectorAll(".status-pill.state").forEach(p =>
       p.dataset.hot = String(!!hot));
@@ -106,7 +107,7 @@ async function refreshState() {
       if (key !== lastHotKey) { soundHotStreak(); toast(`🔥 Mesa quente: ${hot.outcome} repetiu ${hot.run}x — considere pausar`, "red"); }
       lastHotKey = key;
     } else { lastHotKey = ""; }
-  } catch (e) { console.warn("state:", e.message); }
+  } catch (e) { document.body.dataset.neuralActive = "false"; console.warn("state:", e.message); }
 }
 
 /* ── timeline ─────────────────────────────────────────────────────────────── */
@@ -421,9 +422,24 @@ function initStrategyLab() {
   const color = $("strategy-color");
   const save = $("save-strategy");
   if (!run || !color || !save) return;
+  const observation = $("strategy-window");
+  const status = $("strategy-status");
+  const valid = (v) => ['home', 'away', 'draw'].includes(v.outcome) && Number.isInteger(v.run) && v.run >= 1 && v.run <= 20 && Number.isInteger(v.window) && v.window >= 1 && v.window <= 10;
+  try {
+    const stored = JSON.parse(localStorage.getItem("blitz.hypothesis.v1") || "null");
+    if (stored && valid(stored)) {
+      color.value = stored.outcome; run.value = stored.run; observation.value = stored.window;
+      status.textContent = "Hipótese recuperada deste navegador. Sem execução automática.";
+    }
+  } catch { status.textContent = "Armazenamento local indisponível ou rascunho inválido."; }
   save.addEventListener("click", () => {
-    const summary = `Hipótese salva: ${color.value} ×${run.value} → revisão manual`;
-    toast(summary);
+    const value = { outcome: color.value, run: Number(run.value), window: Number(observation.value) };
+    if (!valid(value)) { status.textContent = "Informe 1–20 repetições e 1–10 rodadas inteiras."; return; }
+    try {
+      localStorage.setItem("blitz.hypothesis.v1", JSON.stringify(value));
+      status.textContent = `Salva neste navegador: ${value.outcome} ×${value.run}, observar ${value.window} rodadas. Sem execução automática.`;
+      toast("Hipótese salva neste navegador");
+    } catch { status.textContent = "Não foi possível salvar no navegador. Verifique as permissões de armazenamento."; }
   });
   document.querySelectorAll(".nav-item").forEach((item) => {
     item.addEventListener("click", () => {
@@ -568,7 +584,118 @@ function initDialKit() {
   } catch (e) { console.warn("dialkit:", e); }
 }
 
-refreshAll(); refreshOmniroute(); wsConnect(); initNeuralField(); initAgentMesh(); initDialKit(); initStrategyLab(); updateClock();
+function initBlitzViewer() {
+  const frame = $("blitz-frame");
+  const placeholder = $("viewer-placeholder");
+  const status = $("viewer-status");
+  const close = $("viewer-close");
+  if (!frame) return;
+  $("viewer-load").addEventListener("click", () => {
+    frame.src = "https://www.zonadejogo.bet.br/play/pragmatic/football-blitz";
+    frame.hidden = false;
+    placeholder.hidden = true;
+    close.hidden = false;
+    status.textContent = "Página externa solicitada. Se não aparecer, abra na Zona de Jogo.";
+  });
+  close.addEventListener("click", () => {
+    frame.removeAttribute("src");
+    frame.hidden = true;
+    placeholder.hidden = false;
+    close.hidden = true;
+    status.textContent = "Visualização externa pausada.";
+  });
+  $("viewer-expand").addEventListener("click", (event) => {
+    const expanded = document.body.classList.toggle("viewer-wide");
+    event.currentTarget.setAttribute("aria-pressed", String(expanded));
+    event.currentTarget.textContent = expanded ? "Reduzir mesa" : "Ampliar mesa";
+  });
+}
+
+function initSemanticBackground() {
+  const canvas = $("semantic-background");
+  const ctx = canvas?.getContext("2d");
+  if (!ctx) return;
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+  let width = 0, height = 0, timer = null, previous = 0, time = 0, activity = 0;
+  let nodes = [];
+  const palette = ["255,90,31", "255,65,110", "62,220,255", "108,255,157", "163,112,255"];
+  function resize() {
+    width = innerWidth; height = innerHeight;
+    const ratio = Math.min(devicePixelRatio || 1, 1.5);
+    canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    const count = Math.min(66, Math.max(22, Math.floor(width * height / 23000)));
+    nodes = Array.from({ length: count }, (_, i) => ({
+      x: Math.random() * width, y: Math.random() * height,
+      vx: (Math.random() - .5) * 8, vy: (Math.random() - .5) * 8,
+      phase: Math.random() * Math.PI * 2, color: i % palette.length,
+      birth: i < count * .55 ? 0 : .1 + Math.random() * .8,
+    }));
+    render();
+  }
+  function render() {
+    ctx.clearRect(0, 0, width, height);
+    const range = Math.min(210, width * .38);
+    const rgb = (node) => activity > .15 ? palette[node.color] : palette[0];
+    const alpha = (node) => node.birth === 0 ? 1 : Math.max(0, Math.min(1, (activity - node.birth) * 4));
+    for (let i = 0; i < nodes.length; i++) {
+      const a = nodes[i], opacity = alpha(a);
+      if (!opacity) continue;
+      for (let j = i + 1; j < nodes.length; j++) {
+        const b = nodes[j], distance = Math.hypot(a.x - b.x, a.y - b.y);
+        const visible = Math.min(opacity, alpha(b));
+        if (distance > range || !visible) continue;
+        const strength = (1 - distance / range) * visible;
+        ctx.strokeStyle = `rgba(${rgb(a)},${strength * (.10 + activity * .13)})`;
+        ctx.lineWidth = .65;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        const progress = (time * (.07 + activity * .20) + i * .19 + j * .13) % 1;
+        const x = a.x + (b.x - a.x) * progress, y = a.y + (b.y - a.y) * progress;
+        ctx.fillStyle = `rgba(${rgb(a)},${strength * (.25 + activity * .35)})`;
+        ctx.beginPath(); ctx.arc(x, y, 1 + activity * .6, 0, Math.PI * 2); ctx.fill();
+      }
+      const pulse = .5 + .5 * Math.sin(time * (1 + activity * 2) + a.phase);
+      const glow = ctx.createRadialGradient(a.x, a.y, 0, a.x, a.y, 10 + pulse * 7);
+      glow.addColorStop(0, `rgba(${rgb(a)},${opacity * (.07 + pulse * .1 + activity * .08)})`);
+      glow.addColorStop(1, `rgba(${rgb(a)},0)`);
+      ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(a.x, a.y, 17, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = `rgba(${rgb(a)},${opacity * (.25 + pulse * .35)})`;
+      ctx.beginPath(); ctx.arc(a.x, a.y, 1 + pulse * .9, 0, Math.PI * 2); ctx.fill();
+    }
+    canvas.dataset.mode = reduced.matches ? "static" : activity > .15 ? "active" : "calm";
+  }
+  function tick() {
+    timer = null;
+    if (document.hidden || reduced.matches) return;
+    const now = performance.now();
+    const dt = Math.min((now - previous) / 1000, .1); previous = now; time += dt;
+    const target = document.body.dataset.neuralActive === "true" ? 1 : 0;
+    activity += (target - activity) * Math.min(1, dt * 1.3);
+    for (const node of nodes) {
+      node.x += node.vx * dt * (1 + activity * 2.5);
+      node.y += node.vy * dt * (1 + activity * 2.5);
+      if (node.x < 0) node.x = width;
+      if (node.x > width) node.x = 0;
+      if (node.y < 0) node.y = height;
+      if (node.y > height) node.y = 0;
+    }
+    render();
+    timer = setTimeout(tick, activity > .15 ? 1000 / 24 : 1000 / 12);
+  }
+  function resume() {
+    clearTimeout(timer); timer = null; previous = performance.now();
+    if (reduced.matches) { activity = 0; render(); }
+    else if (!document.hidden) tick();
+  }
+  resize(); resume();
+  window.addEventListener("resize", resize);
+  document.addEventListener("visibilitychange", resume);
+  reduced.addEventListener("change", resume);
+  window.addEventListener("pagehide", () => clearTimeout(timer));
+  window.addEventListener("pageshow", resume);
+}
+
+refreshAll(); refreshOmniroute(); wsConnect(); initStrategyLab(); initBlitzViewer(); initSemanticBackground(); updateClock();
 setInterval(refreshState, 4000);
 setInterval(refreshGame, 10000);
 setInterval(refreshStats, 15000);

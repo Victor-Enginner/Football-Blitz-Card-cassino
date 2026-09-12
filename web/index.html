@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#000000">
+  <meta name="theme-color" content="#09090b">
   <title>Blitz Scanner — Command Center</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,12 +13,7 @@
 </head>
 <body data-state="OFFLINE">
 
-  <!-- ambient particle field (CSS triangles, low opacity) -->
-  <div class="ambient" aria-hidden="true">
-    <i style="top:12%;left:8%;color:#8052ff"></i><i style="top:64%;left:4%;color:#ffb829"></i>
-    <i style="top:28%;left:88%;color:#15846e"></i><i style="top:78%;left:92%;color:#8052ff"></i>
-    <i style="top:44%;left:96%;color:#c471ff"></i><i style="top:86%;left:18%;color:#5b8cff"></i>
-  </div>
+  <canvas id="semantic-background" aria-hidden="true"></canvas>
 
   <nav class="site-nav">
     <a class="brand" href="#home" aria-label="Blitz Scanner">
@@ -26,6 +21,7 @@
       <span class="brand-word">BLITZ</span>
     </a>
     <div class="nav-links">
+      <a class="nav-link" href="#blitz-viewer">JOGO</a>
       <a class="nav-link" href="#observatory">OBSERVATÓRIO</a>
       <a class="nav-link" href="#agents">AGENTES</a>
       <a class="nav-link" href="#operations">OPERAÇÃO</a>
@@ -43,26 +39,46 @@
     <section class="hero">
       <div class="hero-copy">
         <p class="hero-label"><span class="live-dot"></span> SISTEMA <b id="hero-ai-status">STANDBY</b> · MODO PAPER · SEM AUTO-EXECUÇÃO</p>
-        <h1 class="hero-title">Leitura ao vivo,<br>inteligência<br><em>distribuída.</em></h1>
-        <p class="hero-body">Observação de Football Blitz em tempo real — eventos auditáveis, hipóteses descritivas e agentes de IA governados. O histórico nunca é previsão.</p>
+        <h1 class="hero-title">Football Blitz <em>Command Center</em></h1>
+        <p class="hero-body">Seu jogo, histórico e controle de sessão no mesmo lugar.</p>
         <div class="hero-meta mono">
           <span>SESSÃO <b id="hero-session">—</b></span>
           <span>EVENTOS <b id="hero-event-budget">0 / 200</b></span>
-          <span>SYNC <b id="hero-sync">--:--:--</b></span>
+          <span>RELÓGIO <b id="hero-sync">--:--:--</b></span>
           <span class="ws-inline">CANAL <b id="ws-status-inline">…</b></span>
         </div>
       </div>
-      <div class="hero-visual">
-        <canvas id="neural-canvas" aria-hidden="true"></canvas>
-        <span class="visual-caption mono">constelação semântica · grafo ao vivo</span>
+    </section>
+
+    <section class="section viewer-section" id="blitz-viewer" aria-labelledby="viewer-title">
+      <div class="viewer-heading">
+        <div><p class="section-label">MESA EM OBSERVAÇÃO</p><h2 id="viewer-title">Football Blitz <span class="provider-tag">Pragmatic Play</span></h2></div>
+        <div class="button-row">
+          <button type="button" class="ghost-button" id="viewer-expand" aria-pressed="false">Ampliar mesa</button>
+          <a class="ghost-button" href="https://www.zonadejogo.bet.br/play/pragmatic/football-blitz" target="_blank" rel="noopener noreferrer">Abrir na Zona de Jogo ↗</a>
+        </div>
       </div>
+      <div class="viewer-stage" id="viewer-stage">
+        <div class="viewer-placeholder" id="viewer-placeholder">
+          <span class="viewer-monogram" aria-hidden="true">FB</span>
+          <h3>Sua mesa, dentro do painel.</h3>
+          <p>Carregue a página oficial da Zona de Jogo para acompanhar o Football Blitz.</p>
+          <button type="button" class="pill-button" id="viewer-load">Carregar jogo</button>
+        </div>
+        <iframe id="blitz-frame" title="Football Blitz — página oficial da Zona de Jogo" hidden allow="fullscreen" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      </div>
+      <div class="viewer-footer">
+        <p id="viewer-status" role="status">Visualização externa pausada.</p>
+        <button type="button" class="ghost-button" id="viewer-close" hidden>Fechar jogo</button>
+      </div>
+      <p class="disclaimer">O site pode exigir login ou impedir a exibição incorporada. Nesse caso, use “Abrir na Zona de Jogo”. O frame não importa resultados para o painel; os registros abaixo pertencem à sessão local.</p>
     </section>
 
     <!-- ══ PIPELINE · flowchart ══════════════════════════════════════════════ -->
     <section class="section" id="observatory">
       <div class="section-head">
         <span class="section-label">FLUXO OPERACIONAL</span>
-        <h2 class="section-title">Do evento observado<br>à resposta citada.</h2>
+        <h2 class="section-title">Do evento observado à resposta citada.</h2>
       </div>
       <ol class="pipeline" id="pipeline">
         <li class="flow-step" data-step="1"><span class="step-num mono">01</span><span class="step-name">OBSERVAR</span><span class="step-desc">evento lido do jogo</span></li>
@@ -79,16 +95,10 @@
       <div class="section-head">
         <span class="section-label">MALHA DE AGENTES</span>
         <h2 class="section-title">Quem pensa com você<span class="accent-dot">.</span></h2>
-        <p class="section-body">Cada nó é um componente real do sistema. O roteador tenta os provedores em ordem — sempre free primeiro — e falha fechado: sem resposta fabricada.</p>
+        <p class="section-body">Componentes do Command Center. Disponibilidade de provedores e execução de agentes precisam de validação própria; conexão do painel não significa IA ativa.</p>
       </div>
       <div class="mesh-wrap">
-        <canvas id="agent-canvas" aria-hidden="true"></canvas>
-        <div class="mesh-legend mono">
-          <span><i class="lg lg-violet"></i> local (OmniRoute)</span>
-          <span><i class="lg lg-amber"></i> free cloud (TokenRouter · NVIDIA)</span>
-          <span><i class="lg lg-teal"></i> pago (AIsa)</span>
-          <span><i class="lg lg-dim"></i> slot 9route (verificação pendente)</span>
-        </div>
+        <ul class="module-list"><li><strong>Observação</strong><span>Entrada de eventos</span></li><li><strong>Proteção</strong><span>Limites da sessão</span></li><li><strong>Ledger</strong><span>Registro auditável</span></li><li><strong>RAG</strong><span>Consulta ao histórico</span></li><li><strong>Router</strong><span>Configuração remota</span></li><li><strong>Copilot</strong><span>Análise com fontes</span></li></ul>
       </div>
     </section>
 
@@ -120,10 +130,11 @@
         <div class="op-block">
           <p class="block-label">STRATEGY BUILDER · HIPÓTESE DESCRITIVA</p>
           <div class="strategy-flow">
-            <p class="flow-line"><span class="mono step-tag">QUANDO</span> resultado <select id="strategy-color"><option>home</option><option>away</option><option>draw</option></select> aparecer <input id="strategy-run" type="number" value="5" min="1" max="20"> vezes</p>
-            <p class="flow-line"><span class="mono step-tag">ENTÃO</span> abrir observação de <input type="number" value="3" min="1" max="10"> rodadas para revisão manual</p>
+            <p class="flow-line"><span class="mono step-tag">QUANDO</span> resultado <select id="strategy-color" aria-label="Resultado da hipótese"><option>home</option><option>away</option><option>draw</option></select> aparecer <input id="strategy-run" aria-label="Repetições da hipótese" type="number" value="5" min="1" max="20"> vezes</p>
+            <p class="flow-line"><span class="mono step-tag">ENTÃO</span> abrir observação de <input id="strategy-window" aria-label="Rodadas para observação" type="number" value="3" min="1" max="10"> rodadas para revisão manual</p>
           </div>
           <button class="ghost-button" id="save-strategy">SALVAR HIPÓTESE →</button>
+          <p id="strategy-status" class="disclaimer" role="status">Rascunho local. Não executa ações automáticas.</p>
         </div>
       </div>
 
@@ -198,7 +209,7 @@
     </section>
   </main>
 
-  <div id="toast"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
   <div id="ws-status" class="ws-status mono">ws: conectando…</div>
   <span id="omniroute-pill" hidden></span>
 

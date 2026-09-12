@@ -2,11 +2,20 @@
 import os
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+except ImportError:
+    pass
+
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.getenv("FB_DATA_DIR", BASE_DIR / "data"))
 DB_PATH = DATA_DIR / os.getenv("FB_DB_NAME", "command_center.db")
 
 # --- AI gateway (OmniRoute primary) -----------------------------------------
+# Explicit opt-in until a remote free provider is configured and validated.
+# User preference: no Ollama/local inference and no implicit paid fallback.
+REMOTE_LLM_ENABLED = os.getenv("FB_REMOTE_LLM_ENABLED", "false").lower() in ("1", "true", "yes")
 OMNIROUTE_BASE_URL = os.getenv("OMNIROUTE_BASE_URL", "http://localhost:20128").rstrip("/")
 OMNIROUTE_MODEL = os.getenv("OMNIROUTE_MODEL", "auto")
 OMNIROUTE_TIMEOUT_S = float(os.getenv("OMNIROUTE_TIMEOUT_S", "60"))
@@ -15,7 +24,7 @@ HERMES_ENDPOINT = os.getenv("HERMES_ENDPOINT", "").strip()  # TokenRouter/OpenAI
 OMNIROUTE_HEALTH = {"enabled": True, "base_url": OMNIROUTE_BASE_URL, "model": OMNIROUTE_MODEL}
 
 # --- AIsa (verified provider, OpenAI-compatible) -------------------------------
-AISA_ENABLED = os.getenv("AISA_ENABLED", "true").lower() in ("1", "true", "yes")
+AISA_ENABLED = os.getenv("AISA_ENABLED", "false").lower() in ("1", "true", "yes")
 AISA_BASE_URL = os.getenv("AISA_BASE_URL", "https://api.aisa.one").rstrip("/")
 AISA_MODEL = os.getenv("AISA_MODEL", "claude-haiku-4-5-20251001")
 AISA_API_KEY = os.getenv("AISA_API_KEY", "").strip()

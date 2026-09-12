@@ -13,6 +13,7 @@ import urllib.error
 from typing import Any
 
 from config import (
+    REMOTE_LLM_ENABLED,
     OMNIROUTE_BASE_URL, OMNIROUTE_MODEL, OMNIROUTE_TIMEOUT_S, OMNIROUTE_API_KEY,
     TOKENROUTER_ENABLED, TOKENROUTER_BASE_URL, TOKENROUTER_MODEL, TOKENROUTER_API_KEY,
     NVIDIA_ENABLED, NVIDIA_BASE_URL, NVIDIA_MODEL, NVIDIA_API_KEY,
@@ -74,6 +75,11 @@ def route_chat(messages: list[dict], temperature: float = 0.2,
     """Try providers in order:
     OmniRoute -> TokenRouter (free) -> NVIDIA NIM (free) -> AIsa -> generic slot.
     Fail closed."""
+    if not REMOTE_LLM_ENABLED:
+        return RouteResult(
+            ok=False, provider="none",
+            error="remote LLM disabled: configure and validate a free remote provider before enabling FB_REMOTE_LLM_ENABLED",
+        )
     errors: list[str] = []
 
     # 1) OmniRoute primary

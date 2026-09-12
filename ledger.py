@@ -121,7 +121,11 @@ class Ledger:
                 raise
 
     # -- hash-chain heads -----------------------------------------------------
+    _CHAIN_TABLES = frozenset({"events", "audit_log", "manual_decisions"})
+
     def _last_hash(self, table: str) -> str:
+        if table not in self._CHAIN_TABLES:
+            raise ValueError(f"unknown chain table: {table}")
         row = self._conn.execute(
             f"SELECT hash FROM {table} ORDER BY id DESC LIMIT 1"
         ).fetchone()
