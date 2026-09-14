@@ -104,14 +104,20 @@ def test_replay_restart_ledger(tmp_path):
     db2.close()
 
 
+def _fresh_iso(seconds_ago=0):
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)).isoformat()
+
+
 def test_signal_anti_streak(tmp_path):
     from ledger import Ledger
     import server
     db = Ledger(tmp_path / "s.db")
     sid = "signal-test-01"
     db.start_session(sid, state="PAPER")
+    # Sinal só existe com rodadas REAIS do observer, dentro da janela fresca.
     for i, o in enumerate(["home"] * 4):
-        db.append_event(sid, f"2026-01-01T00:00:0{i}+00:00", o, "simulated")
+        db.append_event(sid, _fresh_iso(120 - i * 10), o, "authorized_readonly")
     old = server.db
     server.db = db
     try:
@@ -131,7 +137,7 @@ def test_signal_needs_four_and_draw_breaks(tmp_path):
     sid = "signal-test-02"
     db.start_session(sid, state="PAPER")
     for i, o in enumerate(["away"] * 3 + ["draw"]):
-        db.append_event(sid, f"2026-01-01T00:00:0{i}+00:00", o, "simulated")
+        db.append_event(sid, _fresh_iso(120 - i * 10), o, "authorized_readonly")
     old = server.db
     server.db = db
     try:
@@ -142,9 +148,54 @@ def test_signal_needs_four_and_draw_breaks(tmp_path):
         db.close()
 
 
+def test_signal_never_from_manual_or_stale_real(tmp_path):
+    """Governança: manual/simulado nunca gera 'sinal confirmado'; real velho também não."""
+    from ledger import Ledger
+    import server
+    for origin, iso in (("manual", _fresh_iso(5)), ("simulated", _fresh_iso(5)),
+                        ("authorized_readonly", _fresh_iso(server.SIGNAL_MAX_STALENESS_S + 60))):
+        db = Ledger(tmp_path / f"s-{origin}-{iso[:13]}.db")
+        sid = "signal-gov-01"
+        db.start_session(sid, state="PAPER")
+        for i in range(4):
+            db.append_event(sid, iso, "home", origin)
+        old = server.db
+        server.db = db
+        try:
+            r = server.signal_current()
+            assert r["signal"] is False, f"origin={origin} não deveria gerar sinal"
+            assert r["cancellation"]["active"] is True
+        finally:
+            server.db = old
+            db.close()
+
+
+def test_signal_carries_operational_metadata(tmp_path):
+    """Sinal real expõe amostra, timestamp de cálculo e validade."""
+    from ledger import Ledger
+    import server
+    db = Ledger(tmp_path / "s-meta.db")
+    sid = "signal-meta-01"
+    db.start_session(sid, state="PAPER")
+    for i in range(4):
+        db.append_event(sid, _fresh_iso(120 - i * 10), "away", "authorized_readonly")
+    old = server.db
+    server.db = db
+    try:
+        r = server.signal_current()
+        assert r["signal"] is True
+        assert r["sample"]["origin"] == "authorized_readonly" and r["sample"]["n"] == 4
+        assert r["computed_at"] and r["valid_until"]
+        assert r["confidence"]["n"] == 4
+        assert r["staleness_seconds"] is not None
+    finally:
+        server.db = old
+        db.close()
+
+
 def test_simulation_mode_only():
     from server import app
-    paths = {r.path for r in app.routes}
+    paths = {getattr(r, "path", None) or getattr(r, "path_format", "") for r in app.routes}
     assert "/api/game/bet" in paths  # paper only
     for p in paths:
         pl = p.lower()

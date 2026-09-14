@@ -125,7 +125,7 @@ def test_hot_streak_detected(monkeypatch, tmp_ledger, engine):
 # ── no bet-execution route exists ─────────────────────────────────────────────
 def test_no_execute_bet_route():
     from server import app
-    paths = {r.path for r in app.routes}
+    paths = {getattr(r, "path", None) or getattr(r, "path_format", "") for r in app.routes}
     forbidden = {"execute_bet", "place_bet", "auto_click", "martingale", "recover_loss"}
     for p in paths:
         for f in forbidden:

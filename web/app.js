@@ -3,6 +3,10 @@
 
 const $ = (id) => document.getElementById(id);
 let lastEventId = 0;
+let lastObservedAt = null;
+let lastEventOrigin = null;
+let lastRealAt = null;          /* último evento authorized_readonly (Date) */
+let wsState = "connecting";     /* connecting | live | reconnecting */
 
 /* ── sound engine: GREEN signal + alerts (WebAudio, no assets) ───────────── */
 let audioCtx = null;
@@ -136,9 +140,18 @@ async function refreshState() {
 }
 
 /* ── timeline ─────────────────────────────────────────────────────────────── */
+function originBadge(origin) {
+  return origin === "authorized_readonly" ? "real" : origin === "manual" ? "manual" : origin === "simulated" ? "simulated" : "other";
+}
 function renderTimeline(events) {
   const tl = $("timeline");
   tl.innerHTML = "";
+  if (!events || !events.length) {
+    tl.innerHTML = `<div class="tl-empty"><b>SEM EVENTOS NO LEDGER</b><span>Inicie o observer na Zona de Jogo para capturar rodadas reais, ou registre uma prévia manual em MAIS · Registro manual.</span></div>`;
+    const st = $("timeline-status");
+    if (st) { st.dataset.state = "idle"; st.textContent = "AGUARDANDO EVENTOS"; }
+    return;
+  }
   for (const ev of events.slice().reverse()) {
     const div = document.createElement("div");
     div.className = "ev" + (ev.id > lastEventId ? " flash" : "");
@@ -146,10 +159,12 @@ function renderTimeline(events) {
     const pnl = meta && typeof meta.pnl !== "undefined" ? ` · R$ ${Number(meta.pnl).toFixed(2)}` : "";
     const pt = ptOutcome(ev.outcome);
     div.innerHTML = `<span class="outcome ${pt.cls}">${pt.emoji} ${pt.name}</span>
-      <span class="origin">${escapeHtml(ev.data_origin)}${pnl}</span>
+      <span class="origin" data-origin="${originBadge(ev.data_origin)}">${escapeHtml(originLabel(ev.data_origin))}${pnl}</span>
       <span class="time">${escapeHtml((ev.observed_at || "").slice(11, 19))}</span>`;
     tl.appendChild(div);
   }
+  const st = $("timeline-status");
+  if (st) { st.dataset.state = "live"; st.textContent = "REGISTRO ATIVO"; }
   /* GREEN signal: sound + toast for genuinely new events */
   const newest = events.length ? events[events.length - 1].id : 0;
   if (lastEventId && newest > lastEventId) {
@@ -345,11 +360,13 @@ function wsConnect() {
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => {
     wsBackoff = 1000;
+    wsState = "live";
     $("ws-status").textContent = "ws: ao vivo";
     $("ws-status").classList.add("on");
     if ($("ws-status-inline")) $("ws-status-inline").textContent = "LIVE";
   };
   ws.onclose = () => {
+    wsState = "reconnecting";
     $("ws-status").textContent = "ws: reconectando…"; $("ws-status").classList.remove("on");
     if ($("ws-status-inline")) $("ws-status-inline").textContent = "RECONNECTING";
     setTimeout(wsConnect, wsBackoff); wsBackoff = Math.min(wsBackoff * 2, 15000);
@@ -361,6 +378,7 @@ function wsConnect() {
         const ev = msg.event;
         renderTimelineAppend(ev);
         updateHologram(ev);
+        if (navigator.vibrate) { try { navigator.vibrate(40); } catch { /* sem vibração */ } }
         soundGreen();
         toast(`🟢 NOVO: ${ev.outcome}`);
         pulsePipeline();
@@ -385,7 +403,7 @@ function renderTimelineAppend(ev) {
   const pnl = meta && typeof meta.pnl !== "undefined" ? ` · R$ ${Number(meta.pnl).toFixed(2)}` : "";
   const ptA = ptOutcome(ev.outcome);
   div.innerHTML = `<span class="outcome ${ptA.cls}">${ptA.emoji} ${ptA.name}</span>
-    <span class="origin">${escapeHtml(ev.data_origin)}${pnl}</span>
+    <span class="origin" data-origin="${originBadge(ev.data_origin)}">${escapeHtml(originLabel(ev.data_origin))}${pnl}</span>
     <span class="time">${escapeHtml((ev.observed_at || "").slice(11, 19))}</span>`;
   tl.insertBefore(div, tl.firstChild);
   const newest = Number(ev.id || 0);
@@ -420,6 +438,7 @@ if (_btnRisk) _btnRisk.addEventListener("click", refreshRisk);
 /* ── sinal ao vivo · 1 clique PAPER ───────────────────────────────────── */
 let lastSignalId = "";
 let pendingSignal = null;
+let signalRequestInFlight = false;
 function renderOrbs(orbs) {
   const el = $("orbs");
   if (!el) return;
@@ -429,7 +448,19 @@ function renderOrbs(orbs) {
   }).join("");
 }
 async function confirmSignal() {
-  if (!pendingSignal) return;
+  if (!pendingSignal || signalRequestInFlight) return;
+  signalRequestInFlight = true;
+  const confirmButtons = [$('btn-signal-confirm'), $('btn-popup-confirm')].filter(Boolean);
+  confirmButtons.forEach((b) => { b.disabled = true; b.dataset.busy = "true"; });
+  /* sinal vencido nunca registra entrada: aguarda recálculo */
+  if (pendingSignal.valid_until && new Date(pendingSignal.valid_until).getTime() < Date.now()) {
+    soundBlock();
+    toast("⛔ Sinal vencido — aguardando nova leitura da mesa", "red");
+    hideSignalPopup();
+    pendingSignal = null;
+    refreshSignal();
+    return;
+  }
   try {
     const r = await api("/api/game/bet", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ bet_type: pendingSignal.side, stake: pendingSignal.stake }) });
@@ -438,7 +469,21 @@ async function confirmSignal() {
     toast(`${pt.emoji} Entrada confirmada: ${pt.name} R$ ${r.bet.stake.toFixed(2)}`);
     hideSignalPopup();
     refreshGame();
-  } catch (err) { soundBlock(); toast("⛔ " + err.message, "red"); }
+  } catch (err) {
+    soundBlock();
+    // Erro de política não deve deixar o diálogo armado nem provocar retries
+    // ao clicar novamente. A sessão precisa ser retomada explicitamente.
+    hideSignalPopup();
+    pendingSignal = null;
+    lastSignalId = "";
+    const card = $("signal-card");
+    if (card) card.dataset.active = "false";
+    toast("⛔ Entrada não registrada: " + err.message, "red");
+    await Promise.allSettled([refreshSignal(), refreshState()]);
+  } finally {
+    signalRequestInFlight = false;
+    confirmButtons.forEach((b) => { b.disabled = false; delete b.dataset.busy; });
+  }
 }
 function hideSignalPopup() {
   const p = $("signal-popup");
@@ -447,6 +492,7 @@ function hideSignalPopup() {
 async function refreshSignal() {
   try {
     const s = await api("/api/signals/current");
+    window.__signalState = s;
     renderOrbs(s.orbs);
     const card = $("signal-card"), orb = $("signal-orb");
     if (s.signal) {
@@ -463,6 +509,7 @@ async function refreshSignal() {
       cb.textContent = `✓ ${stakeTxt}`;
       $("btn-signal-dismiss").hidden = false;
       pendingSignal = s;
+      updateHologramSignal(s);
       if (s.signal_id !== lastSignalId) {
         lastSignalId = s.signal_id;
         const pt = ptOutcome(s.side);
@@ -480,28 +527,82 @@ async function refreshSignal() {
       card.dataset.active = "false";
       orb.textContent = "–";
       orb.className = "signal-orb";
-      $("signal-title").textContent = "Sem sinal";
+      $("signal-title").textContent = "Sem entrada confirmada";
       const base = s.base_outcome ? ptOutcome(s.base_outcome) : null;
-      $("signal-sub").textContent = base ? `Sequência atual: ${base.name} ×${s.run} (precisa 4×)…` : "Aguardando 4× seguidos…";
+      $("signal-sub").textContent = s.cancellation && s.cancellation.active && s.cancellation.reason
+        ? `Estratégia suspensa: ${s.cancellation.reason}.`
+        : base ? `Sequência real atual: ${base.name} ×${s.run} (dispara em 4×).` : "Aguardando rodadas reais do observer…";
       $("btn-signal-confirm").hidden = true;
       $("btn-signal-dismiss").hidden = true;
       pendingSignal = null;
+      updateHologramSignal(null);
       hideSignalPopup();
+      setSignalMeta(null, s);
     }
+    if (s.signal) setSignalMeta(s, s);
   } catch (e) { /* sem sinal se offline */ }
+}
+/* ── sinal operacional: metadados visíveis (amostra, validade, cancelamento) ── */
+function setSignalMeta(signal, raw) {
+  const box = $("signal-meta");
+  if (!box) return;
+  const s = signal || raw || {};
+  const sample = s.sample || {};
+  const isReal = sample.origin === "authorized_readonly";
+  $("sig-rule").textContent = signal ? String(s.rule || "anti-streak").toUpperCase() : "SEM ESTRATÉGIA ATIVA";
+  $("sig-sample").textContent = isReal
+    ? `${sample.n || 0} rodadas reais${sample.complete ? " · janela completa" : ""}`
+    : "—";
+  $("sig-confidence").textContent = signal && s.confidence
+    ? `n=${s.confidence.n} · ${s.confidence.basis || ""}`
+    : "SEM AMOSTRA REAL";
+  $("sig-computed").textContent = s.computed_at ? String(s.computed_at).slice(11, 19) + " UTC" : "—";
+  $("sig-valid").textContent = signal && s.valid_until ? String(s.valid_until).slice(11, 19) + " UTC" : "—";
+  const status = $("sig-status");
+  if (signal) {
+    box.dataset.state = "armed";
+    status.textContent = "SINAL ATIVO · PAPER";
+  } else if (s.cancellation && s.cancellation.active) {
+    box.dataset.state = "cancelled";
+    status.textContent = "SUSPENSA · " + (s.cancellation.reason || "sem dados").toUpperCase();
+  } else {
+    box.dataset.state = "idle";
+    status.textContent = isReal ? "SEM ENTRADA CONFIRMADA" : "SEM CAPTURA REAL";
+  }
+  const cancel = $("signal-cancel");
+  if (cancel) {
+    const c = s.cancellation;
+    cancel.hidden = !(c && c.active && c.reason);
+    if (c && c.active && c.reason) cancel.textContent = `⚠ ${c.reason}. O sistema não emite recomendação sem rodadas reais recentes.`;
+  }
 }
 const _btnSigC = $("btn-signal-confirm"), _btnSigD = $("btn-signal-dismiss");
 if (_btnSigC) _btnSigC.addEventListener("click", confirmSignal);
-if (_btnSigD) _btnSigD.addEventListener("click", () => { lastSignalId = pendingSignal ? pendingSignal.signal_id : lastSignalId; pendingSignal = null; hideSignalPopup(); const c = $("signal-card"); if (c) c.dataset.active = "false"; });
+if (_btnSigD) _btnSigD.addEventListener("click", () => { lastSignalId = pendingSignal ? pendingSignal.signal_id : lastSignalId; pendingSignal = null; updateHologramSignal(null); hideSignalPopup(); const c = $("signal-card"); if (c) c.dataset.active = "false"; });
 const _btnPopC = $("btn-popup-confirm"), _btnPopD = $("btn-popup-dismiss");
 if (_btnPopC) _btnPopC.addEventListener("click", confirmSignal);
-if (_btnPopD) _btnPopD.addEventListener("click", () => { lastSignalId = pendingSignal ? pendingSignal.signal_id : lastSignalId; pendingSignal = null; hideSignalPopup(); });
+if (_btnPopD) _btnPopD.addEventListener("click", () => { lastSignalId = pendingSignal ? pendingSignal.signal_id : lastSignalId; pendingSignal = null; updateHologramSignal(null); hideSignalPopup(); });
 
 /* ── holograma scan + contagem de cartas ──────────────────────────────── */
 function updateHologram(ev) {
-  if (!ev) return;
+  const hg = $("hologram");
+  if (!hg) return;
+  window.__holoEvent = ev || null;
+  if (!ev) {
+    hg.dataset.state = "waiting";
+    $("holo-status").textContent = "AGUARDANDO PARTIDA";
+    $("holo-detail").textContent = "Abra o Football Blitz para iniciar a captura do observer.";
+    $("holo-origin").textContent = "ORIGEM: —";
+    $("holo-conf").textContent = "SEM EVENTO REAL";
+    $("holo-home").textContent = "–"; $("holo-away").textContent = "–";
+    const out0 = $("holo-out"); out0.textContent = "—"; out0.className = "holo-out";
+    $("holo-time").textContent = "--:--:--";
+    return;
+  }
   let meta = {};
   try { meta = JSON.parse(ev.metadata || "{}"); } catch { meta = {}; }
+  const isReal = ev.data_origin === "authorized_readonly";
+  const hasCards = isReal && Boolean(meta.home_card && meta.away_card);
   const h = (meta.home_card || "–").toUpperCase(), a = (meta.away_card || "–").toUpperCase();
   $("holo-home").textContent = h;
   $("holo-away").textContent = a;
@@ -509,10 +610,41 @@ function updateHologram(ev) {
   const out = $("holo-out");
   out.textContent = `${pt.emoji} ${pt.name}`;
   out.className = "holo-out o-" + (["home", "away", "draw"].includes(ev.outcome) ? ev.outcome : "");
-  const hg = $("hologram");
+  /* manual/simulado nunca passa por resultado confirmado da mesa */
+  if (!isReal) {
+    hg.dataset.state = ev.data_origin === "simulated" ? "simulated" : "manual";
+    $("holo-status").textContent = ev.data_origin === "simulated" ? "PRÉVIA SIMULADA" : "PRÉVIA MANUAL";
+    $("holo-detail").textContent = "Registro rotulado — não representa leitura da mesa.";
+  } else {
+    hg.dataset.state = hasCards ? "result" : "outcome-only";
+    $("holo-status").textContent = hasCards ? "RESULTADO CONFIRMADO" : "RESULTADO SEM CARTAS";
+    $("holo-detail").textContent = hasCards
+      ? "Leitura dupla confirmada pelo observer na Zona de Jogo."
+      : "Observer registrou o resultado; cartas não estavam visíveis.";
+  }
+  $("holo-origin").textContent = `ORIGEM: ${originLabel(ev.data_origin)}`;
+  $("holo-conf").textContent = isReal ? "DADO REAL · OBSERVER" : "RÓTULO: " + ev.data_origin.toUpperCase();
+  $("holo-time").textContent = (ev.observed_at || "").slice(11, 19) || "--:--:--";
   hg.classList.remove("pulse");
   void hg.offsetWidth;
   hg.classList.add("pulse");
+}
+
+/* reavalia o dock a cada segundo: captura atrasada volta ao estado de espera */
+const HOLO_HOLD_STATES = ["waiting", "manual", "simulated"];
+function updateHologramFreshness() {
+  const hg = $("hologram");
+  const ev = window.__holoEvent;
+  if (!hg || !ev) return;
+  const when = new Date(ev.observed_at || "");
+  if (Number.isNaN(when.getTime())) return;
+  const age = (Date.now() - when.getTime()) / 1000;
+  const isReal = ev.data_origin === "authorized_readonly";
+  if (isReal && age > 120 && !HOLO_HOLD_STATES.includes(hg.dataset.state)) {
+    hg.dataset.state = "capture-stale";
+    $("holo-status").textContent = "CAPTURA ATRASADA";
+    $("holo-detail").textContent = `Sem novas leituras há ${formatAge(when)} — aguardando a volta da partida ou do observer.`;
+  }
 }
 async function refreshCards() {
   try {
@@ -528,13 +660,58 @@ async function refreshCards() {
 }
 
 /* ── app shell · abas + painéis visuais ───────────────────────────────── */
-document.querySelectorAll("[data-tab]").forEach((b) =>
-  b.addEventListener("click", () => {
-    const v = b.dataset.tab;
-    document.querySelectorAll(".view").forEach((s) => s.classList.toggle("active", s.dataset.view === v));
-    document.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("active", x.dataset.tab === v));
-  })
-);
+function navigateWorkspace(v, updateHash = true) {
+  const views = [...document.querySelectorAll(".view")];
+  if (!views.some(s => s.dataset.view === v)) v = "lobby";
+  document.body.dataset.workspace = v;
+  views.forEach(s => s.classList.toggle("active", s.dataset.view === v));
+  document.querySelectorAll("[data-tab]").forEach(x => {
+    x.classList.toggle("active", x.dataset.tab === v);
+    if (x.closest("nav")) {
+      if (x.dataset.tab === v) x.setAttribute("aria-current", "page");
+      else x.removeAttribute("aria-current");
+    }
+  });
+  if (updateHash && location.hash !== `#${v}`) history.pushState(null, "", `#${v}`);
+  window.scrollTo({ top: 0, behavior: "instant" });
+}
+function updateHologramSignal(signal) {
+  const el = $("holo-signal");
+  if (!el) return;
+  if (!signal || !signal.signal) {
+    el.textContent = "SINAL: SEM ENTRADA CONFIRMADA";
+    el.classList.remove("armed");
+    return;
+  }
+  const pt = ptOutcome(signal.side);
+  el.textContent = `SINAL PAPER: ${pt.emoji} ${pt.name} · R$ ${Number(signal.stake).toFixed(2)}`;
+  el.classList.add("armed");
+}
+
+function formatAge(date) {
+  if (!date || Number.isNaN(date.getTime())) return "—";
+  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (seconds < 5) return "AGORA";
+  if (seconds < 60) return `${seconds}s atrás`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}min atrás`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h atrás`;
+  return `${Math.floor(seconds / 86400)}d atrás`;
+}
+
+function originLabel(origin) {
+  return ({ authorized_readonly: "ZONA DE JOGO · OBSERVER", manual: "REGISTRO MANUAL", simulated: "SIMULAÇÃO" })[origin] || String(origin || "—").toUpperCase();
+}
+document.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => navigateWorkspace(b.dataset.tab)));
+window.addEventListener("popstate", () => navigateWorkspace(location.hash.slice(1), false));
+navigateWorkspace(location.hash.slice(1) || "lobby", false);
+// Reuse the API-bound displays: no duplicate polling or invented lobby metrics.
+document.querySelectorAll("[data-mirror]").forEach(target => {
+  const source = $(target.dataset.mirror);
+  if (!source) return;
+  const sync = () => { target.textContent = source.textContent.trim() || "—"; };
+  new MutationObserver(sync).observe(source, { childList: true, characterData: true, subtree: true });
+  sync();
+});
 /* registro rápido 1 toque */
 document.querySelectorAll("[data-quick]").forEach((b) =>
   b.addEventListener("click", async () => {
@@ -558,11 +735,22 @@ function dialPct(id, val, color) {
 }
 async function refreshBoard() {
   try {
-    const data = await api("/api/events?n=100");
-    const evs = data.events || [];
+    const data = await api("/api/events?n=500");
+    const allEvents = data.events || [];
+    const realEvents = allEvents.filter(e => e.data_origin === "authorized_readonly");
+    // Once observer data exists, analysis is based only on real captured rounds.
+    // Before that, the UI may preview stored manual/simulated data and labels it.
+    const evs = (realEvents.length ? realEvents : allEvents).slice(-50);
     const outs = evs.map((e) => e.outcome).filter((o) => ["home", "away", "draw"].includes(o));
     const n = outs.length;
+    /* estado compartilhado com ribbon e faixa do lobby */
+    window.__windowSize = n;
+    window.__windowReal = realEvents.length > 0;
+    const lastReal = realEvents.length ? realEvents[realEvents.length - 1] : null;
+    if (lastReal) lastRealAt = new Date(lastReal.observed_at);
+    if (!lastObservedAt && evs.length) lastObservedAt = new Date(evs[evs.length - 1].observed_at);
     $("res-count").textContent = n;
+    $("window-size").textContent = n;
     /* grade */
     const grid = $("results-grid");
     grid.innerHTML = outs.slice(-100).map((o) => `<i class="g-${o}" title="${o}"></i>`).join("");
@@ -573,6 +761,9 @@ async function refreshBoard() {
     $("pct-home").textContent = (pc("home") * 100).toFixed(1) + "%";
     $("pct-away").textContent = (pc("away") * 100).toFixed(1) + "%";
     $("pct-draw").textContent = (pc("draw") * 100).toFixed(1) + "%";
+    $("count-home").textContent = `${c.home}×`;
+    $("count-away").textContent = `${c.away}×`;
+    $("count-draw").textContent = `${c.draw}×`;
     $("pb-home").style.width = pc("home") * 100 + "%";
     $("pb-away").style.width = pc("away") * 100 + "%";
     $("pb-draw").style.width = pc("draw") * 100 + "%";
@@ -583,11 +774,19 @@ async function refreshBoard() {
     if (evs.length) {
       const last = evs[evs.length - 1], pt = ptOutcome(last.outcome);
       updateHologram(last);
+      window.__lastOutcomeName = `${pt.emoji} ${pt.name}`;
+      window.__lastOutcomeOrigin = last.data_origin;
       const lo = $("last-orb");
       lo.textContent = pt.emoji || "●";
       lo.className = "signal-orb side-" + (["home", "away", "draw"].includes(last.outcome) ? last.outcome : "");
       $("last-name").textContent = `${pt.emoji} ${pt.name}`;
-      $("last-time").textContent = (last.observed_at || "").slice(11, 19) + " · " + last.data_origin;
+      $("last-time").textContent = (last.observed_at || "").slice(11, 19) + " · " + originLabel(last.data_origin);
+      lastObservedAt = new Date(last.observed_at);
+      lastEventOrigin = last.data_origin;
+      $("live-origin").textContent = originLabel(last.data_origin);
+      $("live-note").textContent = realEvents.length
+        ? `Análise isolada nas últimas ${Math.min(50, realEvents.length)} rodadas capturadas da Zona de Jogo.`
+        : "Prévia com dados armazenados; aguardando o primeiro evento real do observer.";
     }
     /* sequência + tendência */
     let run = 0, cur = outs.length ? outs[outs.length - 1] : null;
@@ -621,6 +820,40 @@ async function refreshBoard() {
       const pt = ptOutcome(k), col = k === "home" ? "#f5c518" : k === "away" ? "#4da3ff" : "#35d07f";
       return `<div class="hot-row"><span>${pt.emoji} ${pt.name}</span><div class="hbar"><i style="width:${(c[k] / mx) * 100}%;background:${col}"></i></div><b>${c[k]}</b></div>`;
     }).join("");
+    /* análise descritiva da janela: sem transformar frequência em previsão */
+    const leader = order[0], leaderPt = ptOutcome(leader), gap = c[order[0]] - c[order[1]];
+    $("analysis-leader").textContent = n ? `${leaderPt.emoji} ${leaderPt.name} · ${(pc(leader) * 100).toFixed(1)}%` : "—";
+    $("analysis-leader-detail").textContent = n ? `${c[leader]} de ${n} resultados; diferença de ${gap} para o segundo.` : "Aguardando resultados.";
+    $("analysis-confidence").textContent = n >= 50 ? "JANELA COMPLETA" : n >= 20 ? "AMOSTRA PARCIAL" : "AMOSTRA PEQUENA";
+    let switches = 0, maxRun = 0, rollingRun = 0, previous = null;
+    outs.forEach(o => { if (previous && o !== previous) switches++; rollingRun = o === previous ? rollingRun + 1 : 1; maxRun = Math.max(maxRun, rollingRun); previous = o; });
+    $("analysis-switches").textContent = n > 1 ? `${switches} · ${(switches / (n - 1) * 100).toFixed(0)}%` : "—";
+    $("analysis-max-run").textContent = maxRun ? `${maxRun} seguidas` : "—";
+    const validDates = evs.map(e => new Date(e.observed_at)).filter(d => !Number.isNaN(d.getTime()));
+    const minutes = validDates.length > 1 ? (validDates.at(-1) - validDates[0]) / 60000 : 0;
+    $("analysis-cadence").textContent = minutes > 0 ? `${((validDates.length - 1) / minutes).toFixed(1)}` : "—";
+    const realCount = evs.filter(e => e.data_origin === "authorized_readonly").length;
+    $("analysis-real").textContent = `${realCount} / ${evs.length}`;
+    const mesaNote = $("mesa-data-note");
+    if (mesaNote) {
+      mesaNote.textContent = window.__windowReal
+        ? `Análise isolada nas ${Math.min(50, realEvents.length)} rodadas reais mais recentes capturadas pelo observer.`
+        : "Sem rodadas reais: prévia com dados armazenados rotulados (manual/simulado). Nada aqui é leitura da mesa.";
+    }
+    const dominance = n ? (pc(leader) * 100) : 0;
+    const observations = [];
+    if (n < 10) observations.push(["AMOSTRA", "Colete pelo menos 10 rodadas para comparar padrões."]);
+    else {
+      observations.push(["FREQUÊNCIA", `${leaderPt.emoji} ${leaderPt.name} lidera a janela com ${dominance.toFixed(1)}%.`]);
+      observations.push(["ALTERNÂNCIA", `${switches} trocas de lado em ${n - 1} transições.`]);
+      observations.push(["SEQUÊNCIA", `Maior repetição observada: ${maxRun} resultados.`]);
+    }
+    $("strategy-observations").innerHTML = observations.map(([label, value]) => `<div><small>${escapeHtml(label)}</small><span>${escapeHtml(value)}</span></div>`).join("");
+    $("ops-timeline-count").textContent = `${Math.min(8, evs.length)} EVENTOS`;
+    $("ops-timeline").innerHTML = evs.slice(-8).reverse().map(e => {
+      const pt = ptOutcome(e.outcome);
+      return `<div class="ev"><span class="outcome ${pt.cls}">${pt.emoji} ${pt.name}</span><span class="origin">${escapeHtml(originLabel(e.data_origin))}</span><span class="time">${escapeHtml((e.observed_at || "").slice(11,19))}</span></div>`;
+    }).join("") || "<span class='dim'>Nenhum evento registrado.</span>";
     /* jogar chips (espelha sinal) */
     const pc2 = $("play-chips");
     if (pendingSignal) {
@@ -851,6 +1084,71 @@ function refreshAll() { refreshState(); refreshEvents(); refreshStats(); syncSes
 function updateClock() {
   const now = new Date();
   if ($("hero-sync")) $("hero-sync").textContent = now.toLocaleTimeString("pt-BR", { hour12: false });
+  if ($("live-clock")) $("live-clock").textContent = now.toLocaleTimeString("pt-BR", { hour12: false });
+  if ($("live-age")) $("live-age").textContent = formatAge(lastObservedAt);
+  if ($("live-rail")) {
+    const age = lastObservedAt && !Number.isNaN(lastObservedAt.getTime()) ? (Date.now() - lastObservedAt.getTime()) / 1000 : Infinity;
+    const currentReal = lastEventOrigin === "authorized_readonly";
+    $("live-rail").dataset.freshness = currentReal && age < 120 ? "live" : currentReal ? "stale" : "offline";
+    $("live-capture").textContent = currentReal && age < 120 ? "OBSERVER ATIVO" : currentReal ? "OBSERVER SEM EVENTO" : "SEM CAPTURA REAL";
+  }
+  updateSystemRibbon(now);
+  updateHologramFreshness();
+  updateLobbyOps(now);
+}
+
+/* ── ribbon de sistema: conexão + captura em uma linha ═══════════════════ */
+function updateSystemRibbon(now) {
+  const rb = $("system-ribbon");
+  if (!rb) return;
+  const txt = $("ribbon-text"), meta = $("ribbon-meta");
+  const age = lastObservedAt && !Number.isNaN(lastObservedAt.getTime()) ? (now - lastObservedAt.getTime()) / 1000 : Infinity;
+  const realAge = lastRealAt && !Number.isNaN(lastRealAt.getTime()) ? (now - lastRealAt.getTime()) / 1000 : Infinity;
+  let state, text, m = [];
+  if (wsState === "connecting") {
+    state = "loading"; text = "Conectando ao canal de eventos…";
+  } else if (wsState === "reconnecting") {
+    state = "reconnecting"; text = "Reconectando ao Command Center — os dados pausam até a reconexão.";
+  } else if (realAge < 120) {
+    state = "live"; text = "AO VIVO · Observer capturando a Zona de Jogo";
+  } else if (lastRealAt) {
+    state = "stale"; text = "Captura atrasada — aguardando a volta da partida ou do observer.";
+  } else {
+    state = "idle"; text = "Conectado. Sem captura real — prévias manuais aparecem rotuladas.";
+  }
+  if (Number.isFinite(age)) m.push(`último evento ${formatAge(lastObservedAt)}`);
+  if (Number.isFinite(realAge)) m.push(`última rodada real ${formatAge(lastRealAt)}`);
+  rb.dataset.state = state;
+  txt.textContent = text;
+  meta.textContent = m.join(" · ") || "—";
+}
+
+/* ── lobby: faixa operacional atualizada a cada segundo ═════════════════ */
+function updateLobbyOps(now) {
+  const capture = $("op-capture");
+  if (!capture) return;
+  const realAge = lastRealAt && !Number.isNaN(lastRealAt.getTime()) ? (now - lastRealAt.getTime()) / 1000 : Infinity;
+  const state = realAge < 120 ? "live" : lastRealAt ? "stale" : "idle";
+  capture.dataset.state = state;
+  $("op-capture-v").textContent = state === "live" ? "AO VIVO · OBSERVER ATIVO" : state === "stale" ? "CAPTURA ATRASADA" : "SEM CAPTURA REAL";
+  $("op-capture-note").textContent = state === "live" ? "Rodadas reais chegando da Zona de Jogo" : state === "stale" ? `Sem rodada real há ${formatAge(lastRealAt)}` : "Observer não enviou rodadas recentes";
+  const lastLive = $("lobby-live");
+  if (lastLive) {
+    lastLive.dataset.state = state;
+    $("lobby-live-text").textContent = state === "live" ? "AO VIVO · captura ativa na Zona de Jogo" : state === "stale" ? "AGUARDANDO PARTIDA · captura atrasada" : "SEM CAPTURA · abra o Football Blitz no observer";
+  }
+  if (lastObservedAt && !Number.isNaN(lastObservedAt.getTime())) {
+    const ptL = ptOutcome(window.__lastOutcomeName || "");
+    $("op-last-v").textContent = window.__lastOutcomeName || "—";
+    $("op-last-note").textContent = `${formatAge(lastObservedAt)} · ${originLabel(window.__lastOutcomeOrigin || "")}`;
+  }
+  $("op-age-v").textContent = lastRealAt ? formatAge(lastRealAt) : "—";
+  $("op-age-note").textContent = lastRealAt ? "Última leitura confirmada do observer" : "Nenhuma rodada real registrada ainda";
+  $("op-window-v").textContent = String(window.__windowSize || 0);
+  $("op-window-note").textContent = window.__windowReal ? "Análise isolada em rodadas reais" : "Sem rodadas reais — prévia rotulada";
+  const sig = window.__signalState;
+  $("op-signal-v").textContent = sig && sig.signal ? `SINAL PAPER · ${ptOutcome(sig.side).name}` : "SEM ENTRADA CONFIRMADA";
+  $("op-signal-note").textContent = sig && sig.cancellation && sig.cancellation.active ? sig.cancellation.reason : sig && sig.signal ? `Válido até ${String(sig.valid_until || "").slice(11, 19)} UTC` : "Estratégia exige rodadas reais recentes";
 }
 
 function initNeuralField() {
@@ -1240,7 +1538,7 @@ $("btn-math").addEventListener("click", () => { goTab("risco"); refreshRisk(); }
 $("btn-ad-close").addEventListener("click", () => { $("agent-detail").hidden = true; });
 $("btn-ad-evidence").addEventListener("click", () => { goTab("mesa"); });
 $("btn-risk-refresh").addEventListener("click", refreshRisk);
-if (!localStorage.getItem("blitz.tour")) startTour();
+// The lobby is the entry point; the guided tour remains available in tools.
 notify("info", "Conectado ao Command Center (PAPER).", "boot");
 setInterval(refreshAgents, 8000);
 refreshAgents();

@@ -75,7 +75,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 """
 
-_LOCK = threading.Lock()
+# RLock: _tx() segura o lock e métodos internos (ex.: _last_hash) reassumem
+# o lock; leituras de rota quente (last_events) compartilham a mesma proteção.
+_LOCK = threading.RLock()
 
 
 def _now() -> str:
@@ -93,7 +95,10 @@ class Ledger:
     def __init__(self, db_path=DB_PATH):
         self.db_path = db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False, timeout=15.0)
+        self._conn.execute("PRAGMA journal_mode=WAL;")
+        self._conn.execute("PRAGMA synchronous=NORMAL;")
+        self._conn.execute("PRAGMA busy_timeout=15000;")
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         # seed audit chain ONCE (only when empty) with a properly hashed genesis row
@@ -126,9 +131,15 @@ class Ledger:
     def _last_hash(self, table: str) -> str:
         if table not in self._CHAIN_TABLES:
             raise ValueError(f"unknown chain table: {table}")
-        row = self._conn.execute(
-            f"SELECT hash FROM {table} ORDER BY id DESC LIMIT 1"
-        ).fetchone()
+        # allowlist + query fixa por tabela (Bandit B608: sem f-string em SQL)
+        if table == "events":
+            q = "SELECT hash FROM events ORDER BY id DESC LIMIT 1"
+        elif table == "audit_log":
+            q = "SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1"
+        else:
+            q = "SELECT hash FROM manual_decisions ORDER BY id DESC LIMIT 1"
+        with _LOCK:
+            row = self._conn.execute(q).fetchone()
         return row["hash"] if row else "0" * 64
 
     # -- events ---------------------------------------------------------------
@@ -177,6 +188,23 @@ class Ledger:
             )
         return {"event_id": event_id, "hash": h, "prev_hash": prev}
 
+    def event_by_id(self, event_id: str) -> dict[str, Any] | None:
+        with _LOCK:
+            row = self._conn.execute(
+                "SELECT * FROM events WHERE event_id = ?", (event_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def capture_history(self, session_id: str, limit: int = 200) -> list[dict[str, Any]]:
+        with _LOCK:
+            rows = self._conn.execute(
+                "SELECT id, event_id, session_id, round_id, outcome, observed_at FROM events "
+                "WHERE session_id = ? AND data_origin = 'authorized_readonly' "
+                "AND parser_version = 'fb-banner-1.0' ORDER BY id DESC LIMIT ?",
+                (session_id, max(1, min(limit, 500))),
+            ).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
     def events_for_session(self, session_id: str) -> list[dict[str, Any]]:
         rows = self._conn.execute(
             "SELECT * FROM events WHERE session_id = ? ORDER BY id", (session_id,)
@@ -184,17 +212,21 @@ class Ledger:
         return [dict(r) for r in rows]
 
     def last_events(self, n: int = 20) -> list[dict[str, Any]]:
-        rows = self._conn.execute(
-            "SELECT * FROM events ORDER BY id DESC LIMIT ?", (n,)
-        ).fetchall()
+        # leitura de rota quente: mesmo lock dos writers evita corrida de threads
+        # no objeto Connection compartilhado (InterfaceError/IndexError intermitente)
+        with _LOCK:
+            rows = self._conn.execute(
+                "SELECT * FROM events ORDER BY id DESC LIMIT ?", (n,)
+            ).fetchall()
         return [dict(r) for r in reversed(rows)]
 
     def count_events_on(self, day: str) -> int:
         """day = YYYY-MM-DD (UTC date part of observed_at)."""
-        row = self._conn.execute(
-            "SELECT COUNT(*) AS c FROM events WHERE substr(observed_at, 1, 10) = ?",
-            (day,),
-        ).fetchone()
+        with _LOCK:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS c FROM events WHERE substr(observed_at, 1, 10) = ?",
+                (day,),
+            ).fetchone()
         return int(row["c"])
 
     # -- sessions ---------------------------------------------------------------
@@ -219,15 +251,17 @@ class Ledger:
             )
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
-        row = self._conn.execute(
-            "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
-        ).fetchone()
+        with _LOCK:
+            row = self._conn.execute(
+                "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
         return dict(row) if row else None
 
     def active_session(self) -> dict[str, Any] | None:
-        row = self._conn.execute(
-            "SELECT * FROM sessions WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1"
-        ).fetchone()
+        with _LOCK:
+            row = self._conn.execute(
+                "SELECT * FROM sessions WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1"
+            ).fetchone()
         return dict(row) if row else None
 
     # -- hypotheses -------------------------------------------------------------
@@ -242,7 +276,8 @@ class Ledger:
             return int(cur.lastrowid)
 
     def list_hypotheses(self) -> list[dict[str, Any]]:
-        rows = self._conn.execute("SELECT * FROM hypotheses ORDER BY id DESC").fetchall()
+        with _LOCK:
+            rows = self._conn.execute("SELECT * FROM hypotheses ORDER BY id DESC").fetchall()
         out = []
         for r in rows:
             d = dict(r)
@@ -291,7 +326,14 @@ class Ledger:
             ("audit_log", ("kind", "detail", "at")),
         ):
             prev = "0" * 64
-            for row in self._conn.execute(f"SELECT * FROM {table} ORDER BY id"):
+            with _LOCK:
+                iterator = self._conn.execute(
+                    "SELECT * FROM events ORDER BY id" if table == "events" else
+                    "SELECT * FROM audit_log ORDER BY id" if table == "audit_log" else
+                    "SELECT * FROM manual_decisions ORDER BY id"
+                )
+                chain_rows = iterator.fetchall()
+            for row in chain_rows:
                 payload = {c: row[c] for c in cols}
                 expected = _digest(prev, payload)
                 if row["prev_hash"] != prev or row["hash"] != expected:
@@ -303,14 +345,20 @@ class Ledger:
     # -- analytics ----------------------------------------------------------------
     def stats(self, session_id: str | None = None) -> dict[str, Any]:
         where, args = ("WHERE session_id = ?", [session_id]) if session_id else ("", [])
-        row = self._conn.execute(
-            f"SELECT COUNT(*) AS n FROM events {where}", args
-        ).fetchone()
-        total = int(row["n"])
-        freq = self._conn.execute(
-            f"SELECT outcome, COUNT(*) AS c FROM events {where} GROUP BY outcome ORDER BY c DESC"
-            " LIMIT 15", args
-        ).fetchall()
+        with _LOCK:
+            if where:
+                row = self._conn.execute("SELECT COUNT(*) AS n FROM events WHERE session_id = ?", args).fetchone()
+            else:
+                row = self._conn.execute("SELECT COUNT(*) AS n FROM events", []).fetchone()
+            total = int(row["n"])
+            if where:
+                freq = self._conn.execute(
+                    "SELECT outcome, COUNT(*) AS c FROM events WHERE session_id = ? GROUP BY outcome ORDER BY c DESC LIMIT 15", args
+                ).fetchall()
+            else:
+                freq = self._conn.execute(
+                    "SELECT outcome, COUNT(*) AS c FROM events GROUP BY outcome ORDER BY c DESC LIMIT 15", []
+                ).fetchall()
         return {
             "total_events": total,
             "outcome_frequency": [{"outcome": r["outcome"], "count": r["c"]} for r in freq],
@@ -318,9 +366,10 @@ class Ledger:
 
     def hot_streak(self, threshold: int) -> dict[str, Any] | None:
         """Longest run of identical trailing outcomes."""
-        rows = self._conn.execute(
-            "SELECT outcome FROM events ORDER BY id DESC LIMIT 200"
-        ).fetchall()
+        with _LOCK:
+            rows = self._conn.execute(
+                "SELECT outcome FROM events ORDER BY id DESC LIMIT 200"
+            ).fetchall()
         if not rows:
             return None
         first = rows[0]["outcome"]
@@ -337,10 +386,11 @@ class Ledger:
     def paper_pnl_today(self, day: str | None = None) -> float:
         """Sum of paper PnL recorded in event metadata.pnl for the given UTC day."""
         day = day or datetime.now(timezone.utc).date().isoformat()
-        rows = self._conn.execute(
-            "SELECT metadata FROM events WHERE substr(observed_at,1,10) = ?",
-            (day,),
-        ).fetchall()
+        with _LOCK:
+            rows = self._conn.execute(
+                "SELECT metadata FROM events WHERE substr(observed_at,1,10) = ?",
+                (day,),
+            ).fetchall()
         total = 0.0
         for r in rows:
             try:

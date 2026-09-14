@@ -6,7 +6,22 @@ try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parent / ".env")
 except ImportError:
-    pass
+    # Minimal production Python may not include python-dotenv. Keep this
+    # fallback server-side and never print values loaded from the file.
+    _env_file = Path(__file__).resolve().parent / ".env"
+    try:
+        for _line in _env_file.read_text(encoding="utf-8").splitlines():
+            _line = _line.strip()
+            if not _line or _line.startswith("#") or "=" not in _line:
+                continue
+            _key, _value = _line.split("=", 1)
+            _key, _value = _key.strip(), _value.strip()
+            if _key and _key.replace("_", "").isalnum() and _key not in os.environ:
+                if len(_value) >= 2 and _value[0] == _value[-1] and _value[0] in "\"'":
+                    _value = _value[1:-1]
+                os.environ[_key] = _value
+    except OSError:
+        pass
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.getenv("FB_DATA_DIR", BASE_DIR / "data"))

@@ -42,7 +42,10 @@ class GameEngine:
 
     def __init__(self, db_path, bankroll_start: float = 200.0):
         self.db_path = db_path
-        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False, timeout=15.0)
+        self._conn.execute("PRAGMA journal_mode=WAL;")
+        self._conn.execute("PRAGMA synchronous=NORMAL;")
+        self._conn.execute("PRAGMA busy_timeout=15000;")
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS paper_bets (

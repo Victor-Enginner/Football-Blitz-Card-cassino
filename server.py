@@ -9,8 +9,9 @@ Security/governance invariants enforced here:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -43,6 +44,8 @@ BUILD_VERSION = "2.1.0-real-system"
 BUILD_GIT = "1012702"
 
 db = Ledger()
+from observer_capture import create_capture_router
+app.include_router(create_capture_router(db, broadcaster, OBSERVER_TOKEN))
 policy = PolicyEngine(db)
 rag = RAGIndex()
 copilot = Copilot(rag)
@@ -202,6 +205,20 @@ def ready():
     }
 
 
+@app.get("/metrics")
+def metrics():
+    evs = db.last_events(1000)
+    return {
+        "events_total": len(evs),
+        "events_today": db.count_events_on(datetime.now(timezone.utc).date().isoformat()),
+        "ws_clients": broadcaster.count,
+        "rag_chunks": len(rag.chunks),
+        "queue_open_bets": len(game.open_bets()) if hasattr(game, "open_bets") else 0,
+        "chain_ok": all(db.verify_chain().values()),
+        "mode": "PAPER",
+    }
+
+
 @app.get("/api/version")
 def version():
     return {"version": BUILD_VERSION, "git": BUILD_GIT, "mode": "PAPER"}
@@ -302,15 +319,57 @@ def maybe_auto_paper() -> dict | None:
     db.audit("auto_paper", f"{side} R$ {lad['stake']:.2f} nível {lad['level']}/5 (sinal {anchor[:8]})")
     return {"bet": bet, "ladder": lad, "anchor": anchor[:12]}
 SIGNAL_STAKE = 0.50
+# Governança do sinal: só rodadas REAIS frescas do observer alimentam a
+# estratégia. Registros manuais/simulados são prévias rotuladas — nunca geram
+# "sinal confirmado". Sinal vence se a captura atrasar.
+SIGNAL_MAX_STALENESS_S = 600   # 10 min sem rodada real => sinal cancelado
+SIGNAL_VALIDITY_S = 90         # janela operacional do sinal emitido
+
+
+def ptSideLabel(side):
+    """Portuguese label for a signal side (home/away)."""
+    return {"home": "MANDANTE", "away": "VISITANTE"}.get(side, str(side).upper())
+
+
+def _fresh_real_window(evs, now):
+    """Window for signal math: only fresh real rounds may trigger signals.
+
+    Returns (window, meta). Manual/simulated data previews the UI but never
+    generates a 'confirmed signal' — the strategy only runs when the observer
+    has actually captured the table within SIGNAL_MAX_STALENESS_S seconds.
+    """
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=SIGNAL_MAX_STALENESS_S)
+
+    def _when(e):
+        try:
+            return datetime.fromisoformat(str(e["observed_at"]))
+        except (TypeError, ValueError):
+            return None
+
+    real = [e for e in evs if e["data_origin"] == "authorized_readonly"]
+    last_real = _when(real[-1]) if real else None
+    if not real or not last_real or last_real < cutoff:
+        return [], {
+            "has_real": bool(real),
+            "last_real_at": real[-1]["observed_at"] if real else None,
+            "staleness": int((now - last_real).total_seconds()) if last_real else None,
+        }
+    return real[-50:], {
+        "has_real": True,
+        "last_real_at": real[-1]["observed_at"],
+        "staleness": int((now - last_real).total_seconds()),
+    }
 
 
 @app.get("/api/signals/current")
 def signal_current():
     evs = db.last_events(200)
-    decisive = [e for e in evs if e["outcome"] in ("home", "away")]
+    real_window, real_meta = _fresh_real_window(evs, datetime.now(timezone.utc))
+    decisive = [e for e in real_window if e["outcome"] in ("home", "away")]
     streak_out, run = None, 0
-    # streak conta eventos consecutivos no ledger (empate quebra)
-    for e in reversed(evs[-60:]):
+    # streak conta apenas rodadas REAIS recentes (empate quebra)
+    for e in reversed(real_window[-60:]):
         o = e["outcome"]
         if o not in ("home", "away"):
             break
@@ -321,10 +380,47 @@ def signal_current():
         else:
             break
     orbs = [e["outcome"] for e in evs[-20:]]
+    if not real_window:
+        # Sem amostra real fresca: nenhuma estratégia calculada — falha fechada.
+        cancel_reason = ("sem evento real do observer nos últimos "
+                         f"{SIGNAL_MAX_STALENESS_S // 60} minutos")
+        return {
+            "signal": False,
+            "run": run,
+            "base_outcome": None,
+            "sample": {"n": 0, "origin": "authorized_readonly", "kind": "real",
+                       "complete": False, "source_label": "ZONA DE JOGO · OBSERVER"},
+            "computed_at": None,
+            "staleness_seconds": real_meta.get("staleness"),
+            "cancellation": {
+                "active": True,
+                "reason": cancel_reason,
+                "last_real_at": real_meta.get("last_real_at"),
+            },
+            "orbs": orbs,
+            "mode": "PAPER",
+        }
+    computed_at = datetime.now(timezone.utc).isoformat()
     if streak_out and run >= ANTI_STREAK_RUN:
         side = "away" if streak_out == "home" else "home"
-        fr = risk_mod.freq_relative([e["outcome"] for e in decisive]) if decisive else {}
-        anchor = evs[-1]["event_id"] if evs else "none"
+        # A pattern is still observable when a session is expired, but it is
+        # not actionable. Returning it as a cancellation prevents the UI from
+        # presenting a misleading entry dialog that can only be rejected.
+        policy_check = policy.check()
+        if not policy_check["allowed"]:
+            return {
+                "signal": False, "run": run, "base_outcome": streak_out,
+                "sample": {"n": len(real_window), "origin": "authorized_readonly",
+                            "kind": "real", "complete": len(real_window) >= 50,
+                            "source_label": "ZONA DE JOGO · OBSERVER"},
+                "computed_at": computed_at,
+                "staleness_seconds": real_meta["staleness"], "orbs": orbs,
+                "mode": "PAPER", "policy_allowed": False,
+                "cancellation": {"active": True,
+                                  "reason": "sessão bloqueada: " + "; ".join(policy_check["reasons"][:2])},
+            }
+        fr = risk_mod.freq_relative([e["outcome"] for e in real_window]) if real_window else {}
+        anchor = real_window[-1]["event_id"] if real_window else "none"
         lad = ladder_now()
         return {
             "signal": True,
@@ -336,15 +432,35 @@ def signal_current():
             "stake": lad["stake"],
             "ladder": lad,
             "auto_paper": AUTO["enabled"],
-            "n_decisive": len(decisive),
+            "expected": ptSideLabel(side),
+            "confidence": {"n": len(real_window),
+                           "basis": f"amostra de {len(real_window)} rodadas reais"},
+            "sample": {"n": len(real_window), "origin": "authorized_readonly",
+                       "kind": "real", "complete": len(real_window) >= 50,
+                       "source_label": "ZONA DE JOGO · OBSERVER"},
+            "computed_at": computed_at,
+            "valid_until": (datetime.now(timezone.utc)
+                            + timedelta(seconds=SIGNAL_VALIDITY_S)).isoformat(),
+            "staleness_seconds": real_meta["staleness"],
             "n_decisive": len(decisive),
             "freq": {k: round(v, 3) for k, v in fr.items()},
             "orbs": orbs,
             "mode": "PAPER",
-            "note": "Sinal visual. Confirme manualmente — 1 clique registra paper.",
+            "note": "Sinal calculado sobre rodadas reais do observer. Confirme manualmente — 1 clique registra paper.",
         }
-    return {"signal": False, "run": run, "base_outcome": streak_out,
-            "orbs": orbs, "mode": "PAPER"}
+    return {
+        "signal": False,
+        "run": run,
+        "base_outcome": streak_out,
+        "sample": {"n": len(real_window), "origin": "authorized_readonly", "kind": "real",
+                   "complete": len(real_window) >= 50,
+                   "source_label": "ZONA DE JOGO · OBSERVER"},
+        "computed_at": computed_at,
+        "staleness_seconds": real_meta["staleness"],
+        "cancellation": {"active": False, "reason": None},
+        "orbs": orbs,
+        "mode": "PAPER",
+    }
 # ── Agents Brain (PAPER, dados reais) ────────────────────────────────────
 # Personalidades funcionais mapeadas a subsistemas reais. Sem métrica
 # inventada: tokens/latência de modelo = null (n/d); confiança sempre com n.
@@ -376,8 +492,12 @@ def agents_status():
     state_session = check["state"]
 
     def ev(e):
-        return {"event_id": e["event_id"][:12], "outcome": e["outcome"],
-                "origin": e["data_origin"], "at": e.get("observed_at", "")} if e else None
+        """Serialize an event for the Brain; tolerates None/row incompleta."""
+        if not e:
+            return None
+        eid = e.get("event_id") or ""
+        return {"event_id": eid[:12], "outcome": e.get("outcome"),
+                "origin": e.get("data_origin"), "at": e.get("observed_at", "")}
 
     agents = [
         {"id": "observador", "nome": "Sentinela", "funcao": "Monitor",
@@ -615,8 +735,15 @@ from fastapi import WebSocket, WebSocketDisconnect, Query
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket, token: str | None = Query(default=None)):
-    if OBSERVER_TOKEN and token != OBSERVER_TOKEN:
-        await ws.close(code=4401)
+    origin = ws.headers.get("origin", "")
+    origin_host = urlparse(origin).hostname if origin else None
+    authenticated_observer = (not OBSERVER_TOKEN) or token == OBSERVER_TOKEN
+    local_dashboard = origin_host in {"localhost", "127.0.0.1", "::1"}
+    # Local dashboard receives broadcasts without learning the observer secret.
+    # A remote/no-Origin client still needs the token, and only authenticated
+    # observers may ingest outcomes through this bidirectional socket.
+    if not authenticated_observer and not local_dashboard:
+        await ws.close(code=4403)
         return
     await broadcaster.connect(ws)
     try:
@@ -628,6 +755,8 @@ async def ws_endpoint(ws: WebSocket, token: str | None = Query(default=None)):
                 continue
             kind = msg.get("kind")
             if kind == "outcome":
+                if not authenticated_observer:
+                    continue
                 # observer bridge: read-only DOM result (origin=authorized_readonly)
                 # VALIDACAO REAL: normaliza outcome + dedup + confirmação dupla.
                 try:

@@ -6,7 +6,7 @@
 // anti-bot systems. It only watches the visible result and reports it.
 //
 // Usage (in the game tab console, after login):
-//   const s = fbObserverCreate({ server: "ws://SEU-VPS:8765/ws", token: "SEU_OBSERVER_TOKEN" });
+//   const s = fbObserverCreate({ server: "ws://127.0.0.1:8766/ws", token: "SEU_OBSERVER_TOKEN" });
 //   // para parar: s.disconnect()
 //
 // Como funciona:
@@ -21,13 +21,14 @@
   window.__fbObserverLoaded = true;
 
   window.fbObserverCreate = function fbObserverCreate(opts) {
-    const server = opts.server || "ws://localhost:8765/ws";
+    const server = opts.server || "ws://localhost:8766/ws";
     const token = opts.token || "";
     let ws = null;
     let backoff = 1000;
-    let lastOutcome = null;
-    let stopped = false;
-    let observer = null;
+  let lastOutcome = null;
+  let lastSent = 0;
+  let stopped = false;
+  let observer = null;
 
     function connect() {
       if (stopped) return;
@@ -36,6 +37,15 @@
       ws.onopen = () => {
         console.info("[fb-observer] conectado ao Command Center");
         backoff = 1000;
+        // flush DLQ
+        try {
+          const q = JSON.parse(localStorage.getItem("fb_dlq") || "[]");
+          if (q.length && ws.readyState === 1) {
+            q.forEach((p) => ws.send(JSON.stringify(p)));
+            console.info(`[fb-observer] DLQ flush ${q.length}`);
+            localStorage.setItem("fb_dlq", "[]");
+          }
+        } catch {}
         start();
       };
       ws.onclose = () => {
@@ -48,12 +58,24 @@
     }
 
     function send(payload) {
+      const now = Date.now();
+      if (now - lastSent < 700) return false; // debounce 700ms (lote Pragmatic)
+      lastSent = now;
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify(payload));
         return true;
       }
+      // DLQ local: guarda se WS caiu
+      try {
+        const q = JSON.parse(localStorage.getItem("fb_dlq") || "[]");
+        q.push(payload);
+        if (q.length > 50) q.shift();
+        localStorage.setItem("fb_dlq", JSON.stringify(q));
+      } catch {}
       return false;
     }
+
+    // flush DLQ ao reconectar
 
     // keepalive ping every 20s
     setInterval(() => send({ kind: "ping", at: Date.now() }), 20000);
@@ -62,6 +84,7 @@
     // Seletores candidatos (Pragmatic muda nomes entre versões; cobrimos os
     // comuns e você pode adicionar o seu após inspecionar com F12).
     const RESULT_SELECTORS = [
+      ".ee_en", // Football Blitz SVG MANDANTE/VISITANTE/EMPATE (Pragmatic)
       "[data-automation-locator*='history'] [class*='item']",
       ".history-item .history-item-value__text",
       "[class*='result'][class*='value']",

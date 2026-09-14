@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net"><diagram name="Blitz Semantic Graph" id="blitz-v1"><mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827"><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+<mxCell id="zona" value="Zona de Jogo&#xa;(client/games.pragmaticplaylive.net)" style="rounded=1;fillColor=#0f172a;strokeColor=#38bdf8;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="180" height="60" as="geometry"/></mxCell>
+<mxCell id="ext" value="Extensão MV3&#xa;capture.js (div.F_M + game-header-game-id)&#xa;armed + 750ms + 1s poll" style="rounded=1;fillColor=#1e293b;strokeColor=#22c55e;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="260" y="40" width="200" height="70" as="geometry"/></mxCell>
+<mxCell id="bg" value="background.js&#xa;local-config.js HMAC&#xa;heartbeat 15s" style="rounded=1;fillColor=#1e293b;strokeColor=#f59e0b;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="500" y="40" width="180" height="70" as="geometry"/></mxCell>
+<mxCell id="api" value="FastAPI 8766&#xa;PUT /api/observer/outcomes&#xa;POST /api/observer/heartbeat&#xa;parser fb-banner-1.0" style="rounded=1;fillColor=#0f172a;strokeColor=#38bdf8;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="720" y="40" width="220" height="80" as="geometry"/></mxCell>
+<mxCell id="ledger" value="Ledger SQLite&#xa;append-only SHA256 chain&#xa;data_origin authorized_readonly" style="rounded=1;fillColor=#334155;strokeColor=#a78bfa;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="720" y="160" width="220" height="70" as="geometry"/></mxCell>
+<mxCell id="ws" value="WS broadcast&#xa;{kind:event}" style="rounded=1;fillColor=#1e293b;strokeColor=#38bdf8;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="980" y="70" width="140" height="50" as="geometry"/></mxCell>
+<mxCell id="monitor" value="monitor.mjs 15s&#xa;health offline/stale/ok&#xa;cursor + gap 120s" style="rounded=1;fillColor=#1e293b;strokeColor=#f59e0b;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="500" y="160" width="180" height="70" as="geometry"/></mxCell>
+<mxCell id="signal" value="Sinal server.py&#xa;4x home/away → PAPER&#xa;valid 90s stale 600s" style="rounded=1;fillColor=#0f172a;strokeColor=#22c55e;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="260" y="160" width="180" height="70" as="geometry"/></mxCell>
+<mxCell id="web" value="web/index.html&#xa;somente leitura" style="rounded=1;fillColor=#334155;strokeColor=#ffffff;fontColor=#ffffff;" vertex="1" parent="1"><mxGeometry x="40" y="160" width="180" height="60" as="geometry"/></mxCell>
+<mxCell id="edge1" edge="1" parent="1" source="zona" target="ext"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="edge2" edge="1" parent="1" source="ext" target="bg"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="edge3" edge="1" parent="1" source="bg" target="api"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="edge4" edge="1" parent="1" source="api" target="ledger"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="edge5" edge="1" parent="1" source="api" target="ws"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="edge6" edge="1" parent="1" source="ledger" target="monitor"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="edge7" edge="1" parent="1" source="ledger" target="signal"><mxGeometry relative="1" as="geometry"/></mxCell>
+</root></mxGraphModel></diagram></mxfile>

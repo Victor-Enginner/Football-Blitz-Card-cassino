@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 
 import requests
@@ -29,6 +30,10 @@ class TelegramNotifier:
         self.base = f"https://api.telegram.org/bot{self.token}" if self.token else None
         self.enabled = bool(self.token and self.chat_id)
         self._stop = threading.Event()
+        # Idempotência local: uma mesma falha pode ser observada por vários
+        # caminhos (evento, popup e retry). Não transforme isso em spam.
+        self._dedup: dict[str, float] = {}
+        self._dedup_lock = threading.Lock()
 
     # -- low-level send -------------------------------------------------------
     def _post(self, method: str, data: dict) -> bool:
@@ -53,6 +58,25 @@ class TelegramNotifier:
             "disable_notification": silent,
         })
 
+    def send_once(self, key: str, text: str, *, ttl_s: float = 90,
+                  silent: bool = False) -> bool:
+        """Envia uma mensagem no máximo uma vez por chave durante *ttl_s*."""
+        now = time.monotonic()
+        with self._dedup_lock:
+            # limpeza oportunista evita crescimento durante daemon longo
+            for old_key, stamp in list(self._dedup.items()):
+                if now - stamp >= ttl_s:
+                    self._dedup.pop(old_key, None)
+            stamp = self._dedup.get(key)
+            if stamp is not None and now - stamp < ttl_s:
+                return False
+            self._dedup[key] = now
+        ok = self.send(text, silent=silent)
+        if not ok:
+            with self._dedup_lock:
+                self._dedup.pop(key, None)
+        return ok
+
     # -- event alerts -----------------------------------------------------------
     def event_added(self, ev: dict) -> None:
         pnl = ""
@@ -74,8 +98,10 @@ class TelegramNotifier:
         )
 
     def blocked(self, reasons: list[str]) -> None:
-        self.send("🚫 *Ação bloqueada pela política:*\n" +
-                  "\n".join(f"⛔ {r}" for r in reasons))
+        clean = tuple(dict.fromkeys(str(r).strip() for r in reasons if str(r).strip()))
+        key = "blocked:" + "|".join(clean)
+        self.send_once(key, "🚫 *Ação bloqueada pela política:*\n" +
+                      "\n".join(f"⛔ {r}" for r in clean), ttl_s=120)
 
     def hot_streak(self, hot: dict) -> None:
         self.send(
@@ -108,7 +134,9 @@ class TelegramNotifier:
 
     def health(self, status: str, detail: str = "") -> None:
         icon = "✅" if status == "ok" else "🛑"
-        self.send(f"{icon} Command Center: *{status}* {detail}".strip())
+        self.send_once(f"health:{status}:{detail}",
+                       f"{icon} Command Center: *{status}* {detail}".strip(),
+                       ttl_s=300)
 
     # -- command polling (optional, non-blocking) --------------------------------
     def start_polling(self, handlers: dict[str, callable]) -> None:

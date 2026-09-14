@@ -36,10 +36,10 @@ python -m pip install fastapi uvicorn pytest
 omniroute serve --daemon --no-open
 
 # 2. Command Center
-python -m uvicorn server:app --port 8765
+python -m uvicorn server:app --port 8766
 
 # 3. Abrir o dashboard
-#    http://localhost:8765
+#    http://localhost:8766
 ```
 
 ## Testes

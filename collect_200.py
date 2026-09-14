@@ -29,8 +29,9 @@ def api(path: str, method: str = "GET", body: dict | None = None):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--target", type=int, default=200)
-    ap.add_argument("--poll", type=float, default=5.0)
+    ap.add_argument("--poll", type=float, default=1.0)
     ap.add_argument("--timeout-min", type=float, default=180.0)
+    ap.add_argument("--max-retries", type=int, default=5)
     args = ap.parse_args()
 
     st = api("/api/state")
@@ -44,22 +45,33 @@ def main() -> int:
     seen: set[str] = set()
     rows: list[dict] = []
     t0 = time.time()
+    retries = 0
+    backoff = 1.0
     while len(rows) < args.target:
         if (time.time() - t0) / 60 > args.timeout_min:
             print(f"Timeout: {len(rows)}/{args.target} coletados.")
             break
         try:
             evs = api("/api/events?n=500")["events"]
+            retries = 0
+            backoff = 1.0
         except Exception as e:
-            print(f"API erro: {e}; retry em {args.poll}s")
-            time.sleep(args.poll)
+            retries += 1
+            if retries > args.max_retries:
+                print(f"API erro persistente após {retries} tentativas: {e}")
+                break
+            wait = min(backoff * (1.5 ** (retries - 1)), 15.0)
+            print(f"API erro: {e}; retry {retries}/{args.max_retries} em {wait:.1f}s")
+            time.sleep(wait)
             continue
         for e in evs:
             eid = e.get("event_id")
             if eid in seen:
                 continue
             seen.add(eid)
-            if e.get("data_origin") == "authorized_readonly":
+            if (e.get("data_origin") == "authorized_readonly"
+                    and e.get("session_id") == session
+                    and len(rows) < args.target):
                 rows.append(e)
         print(f"\rColetados: {len(rows)}/{args.target}", end="", flush=True)
         if len(rows) >= args.target:
@@ -80,7 +92,7 @@ def main() -> int:
 
     # validação imediata
     sys.path.insert(0, str(Path(__file__).parent))
-    from risk import summarize_session, kelly_fraction
+    from risk import summarize_session
     outcomes = [e["outcome"] for e in rows]
     s = summarize_session(outcomes, [])
     print(f"n={s['n']} freq={s['freq']} entropia={s['entropy_bits']}bits")
