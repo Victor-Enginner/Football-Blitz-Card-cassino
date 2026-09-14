@@ -17,6 +17,12 @@ Data: 2026-09-12 · Backend v2.1.0-real-system · 63 testes verdes · Modo PAPER
 - Aprendido: opencode com `cwd` explícito enxerga o workspace mapeado em outro caminho (C:\workspace\...) e falha ao editar arquivos; rodar SEM cwd. Agente pode alucinar checkbox — sempre confirmar o arquivo depois.
 - Pendente: importar cron jobs (openclaw-cron-jobs.json.example), Telegram no OpenClaw (token + allowFrom), rodar `run_multi_agent.py` em modo paper p/ gerar metrics.json.
 
+## Queda do gateway + fix (2026-09-14)
+- Causa: gateway subiu SEM token configurado → gerou token runtime volátil; mudança de gateway.auth.mode disparou restart → serviço morreu (schtasks não religou) → `ECONNREFUSED 127.0.0.1:18789` no `openclaw tui`.
+- Fix: `openclaw config set gateway.auth.mode token` + `openclaw config set gateway.auth.token <random>` (persistido no ~/.openclaw/openclaw.json) + `openclaw gateway restart`. Health ok, CLI autentica (sem token_mismatch).
+- Cheat sheet: status = `openclaw gateway status`; subir = `openclaw gateway start`; cair de novo = `openclaw gateway restart`; diagnóstico = `openclaw doctor`; TUI = `openclaw tui`; dashboard browser = `openclaw dashboard` (colar token se pedir — revelar com `openclaw gateway auth-token --show`).
+- Chain de modelos validada com `openclaw agent -m` (turn real respondeu): primary `openrouter/cohere/north-mini-code:free` + fallbacks :free + último `ollama/qwen2.5-coder:1.5b` (local). Zero API paga. Ollama hoje OFF — se quiser 100% local, virar primary e subir Ollama.
+
 ## Estado atual (fato)
 - Backend: `http://127.0.0.1:8766` (uvicorn, processo solto — SEM serviço ainda).
 - Frontend: app 6 abas (SINAL/MESA/PAPEL/RISCO/BRAIN/MAIS), PWA, sons, holograma scan.
