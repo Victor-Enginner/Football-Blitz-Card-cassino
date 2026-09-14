@@ -22,6 +22,7 @@ Data: 2026-09-12 · Backend v2.1.0-real-system · 63 testes verdes · Modo PAPER
 - Fix: `openclaw config set gateway.auth.mode token` + `openclaw config set gateway.auth.token <random>` (persistido no ~/.openclaw/openclaw.json) + `openclaw gateway restart`. Health ok, CLI autentica (sem token_mismatch).
 - Cheat sheet: status = `openclaw gateway status`; subir = `openclaw gateway start`; cair de novo = `openclaw gateway restart`; diagnóstico = `openclaw doctor`; TUI = `openclaw tui`; dashboard browser = `openclaw dashboard` (colar token se pedir — revelar com `openclaw gateway auth-token --show`).
 - Chain de modelos validada com `openclaw agent -m` (turn real respondeu): primary `openrouter/cohere/north-mini-code:free` + fallbacks :free + último `ollama/qwen2.5-coder:1.5b` (local). Zero API paga. Ollama hoje OFF — se quiser 100% local, virar primary e subir Ollama.
+- Briefing pronto p/ colar no OpenClaw (contexto do projeto + regras: nunca pedir credenciais, nunca aposta real, sem VPS por enquanto) — resposta ao agente que pediu "detalhes de conexão da VPS". NUNCA colar credenciais SSH/tokens em chat de IA.
 
 ## Estado atual (fato)
 - Backend: `http://127.0.0.1:8766` (uvicorn, processo solto — SEM serviço ainda).
