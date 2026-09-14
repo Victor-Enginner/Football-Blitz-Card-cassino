@@ -1,6 +1,15 @@
 # MEMÓRIA DA SESSÃO — Football Blitz Command Center
 Data: 2026-09-12 · Backend v2.1.0-real-system · 63 testes verdes · Modo PAPER
 
+## Sessão 2026-09-14 (volta do projeto)
+- **Commit `20158ad`**: risco/progressão/coletor/docs da sessão 12 finalmente versionados (20 arquivos, 2288 linhas) — risco de stub resolvido.
+- T1 ok (`backup_20260914/` com .env + DBs), T2 ok (`limit:3000` ativo em `/api/events/today-count`), T4 ok (`start_command_center.bat` criado; `/ready` chain True).
+- T13/T15 ok: `watchdog.bat` (check 60s, revive, log rotativo 1MB) + receita `deploy/WINDOWS_SERVICE.md`; **teste de queda 2/2** (taskkill → "DOWN - restarting" → `/ready` 200 com chain True).
+- Aprendido: `timeout` em .bat trava com stdin redirecionado → trocado por `ping -n`; `start ... > nul` evita pipe herdado.
+- Sessão antiga de 12/09 parada (`/api/session/stop`); estava MANUAL_REVIEW com 2693min.
+- `BUILD_GIT` é hardcoded em `server.py:43` — o `/ready` mostrar hash velho não significa build errado.
+- Pendências operador: **T3** escada nível 5 (6 ou 8?), **T14** token Telegram, registrar watchdog no Task Scheduler (Opção A do WINDOWS_SERVICE.md).
+
 ## Estado atual (fato)
 - Backend: `http://127.0.0.1:8766` (uvicorn, processo solto — SEM serviço ainda).
 - Frontend: app 6 abas (SINAL/MESA/PAPEL/RISCO/BRAIN/MAIS), PWA, sons, holograma scan.
