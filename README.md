@@ -1,3 +1,5 @@
+![Neon Terminal](https://capsule-render.vercel.app/api?type=waving&color=0:0f172a,100:22c55e&height=120&section=header&text=FOOTBALL%20BLITZ&fontColor=38bdf8&fontSize=32&animation=fadeIn&desc=COMMAND%20CENTER%20%E2%80%A2%20PAPER%20ONLY&descAlignY=75)
+
 # ⚽ Football Blitz Command Center
 
 Sistema local-first de **observação, análise e governança** para o jogo
