@@ -1,5 +1,7 @@
 # secrets — NEVER commit
 .env
+*.bak-*
+backup_*/
 
 # local dev data
 data/

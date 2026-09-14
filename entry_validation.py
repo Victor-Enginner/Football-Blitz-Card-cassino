@@ -10,6 +10,7 @@ def validate_outcome(outcome) -> str:
         raise ValueError(f"outcome deve ser str, veio {type(outcome).__name__}")
     o = outcome.strip().lower()
     aliases = {"empate": "draw", "casa": "home", "fora": "away",
+               "mandante": "home", "visitante": "away",
                "h": "home", "a": "away", "d": "draw",
                "home win": "home", "away win": "away"}
     o = aliases.get(o, o)

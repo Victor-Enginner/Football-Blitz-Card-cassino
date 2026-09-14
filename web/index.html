@@ -2,9 +2,14 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#09090b">
-  <title>Blitz Scanner — Command Center</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0806">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Blitz Scanner">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="/blitz-icon.svg">
+  <title>Blitz Scanner — Football Blitz</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -15,208 +20,371 @@
 
   <canvas id="semantic-background" aria-hidden="true"></canvas>
 
-  <nav class="site-nav">
-    <a class="brand" href="#home" aria-label="Blitz Scanner">
+  <!-- ══ TOPBAR · app ══════════════════════════════════════════════════════ -->
+  <header class="topbar">
+    <div class="brand">
       <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L22 20 L2 20 Z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 8 L17 18 L7 18 Z" fill="currentColor" opacity=".55"/></svg>
       <span class="brand-word">BLITZ</span>
-    </a>
-    <div class="nav-links">
-      <a class="nav-link" href="#blitz-viewer">JOGO</a>
-      <a class="nav-link" href="#observatory">OBSERVATÓRIO</a>
-      <a class="nav-link" href="#agents">AGENTES</a>
-      <a class="nav-link" href="#operations">OPERAÇÃO</a>
-      <a class="nav-link" href="#audit">AUDITORIA</a>
-    </div>
-    <div class="nav-actions">
       <span class="nav-state mono" id="state-pill">OFFLINE</span>
-      <button class="pill-button" data-scroll="#operations">PAINEL</button>
     </div>
-  </nav>
+    <nav class="tabs" aria-label="Abas">
+      <button class="tab active" data-tab="sinal">◉ SINAL</button>
+      <button class="tab" data-tab="mesa">▦ MESA</button>
+      <button class="tab" data-tab="papel">⛁ PAPEL</button>
+      <button class="tab" data-tab="risco">⚠ RISCO</button>
+      <button class="tab" data-tab="brain">⛨ BRAIN</button>
+      <button class="tab" data-tab="mais">⋯ MAIS</button>
+    </nav>
+    <div class="top-chips mono">
+      <span class="chip" id="top-balance">R$ —</span>
+      <span class="chip" id="ws-status-inline">…</span>
+      <span class="chip" id="hero-session">—</span>
+      <span class="chip hide" id="hero-event-budget">0 / 200</span>
+      <span class="chip hide" id="hero-sync">--:--:--</span>
+      <span class="chip hide" id="hero-ai-status">STANDBY</span>
+    </div>
+  </header>
 
-  <main class="page" id="home">
+  <main class="app" id="home">
 
-    <!-- ══ HERO · two-column split ═══════════════════════════════════════════ -->
-    <section class="hero">
-      <div class="hero-copy">
-        <p class="hero-label"><span class="live-dot"></span> SISTEMA <b id="hero-ai-status">STANDBY</b> · MODO PAPER · SEM AUTO-EXECUÇÃO</p>
-        <h1 class="hero-title">Football Blitz <em>Command Center</em></h1>
-        <p class="hero-body">Seu jogo, histórico e controle de sessão no mesmo lugar.</p>
-        <div class="hero-meta mono">
-          <span>SESSÃO <b id="hero-session">—</b></span>
-          <span>EVENTOS <b id="hero-event-budget">0 / 200</b></span>
-          <span>RELÓGIO <b id="hero-sync">--:--:--</b></span>
-          <span class="ws-inline">CANAL <b id="ws-status-inline">…</b></span>
-        </div>
+    <!-- ══ SINAL ═══════════════════════════════════════════════════════════ -->
+    <section class="view active" data-view="sinal">
+      <div class="cols">
+        <!-- esquerda: registro + gauges + tendência -->
+        <aside class="col side">
+          <div class="panel">
+            <p class="block-label">⚡ REGISTRO RÁPIDO</p>
+            <div class="quick-grid">
+              <button class="qbtn q-home" data-quick="home">🟡<small>MANDANTE</small></button>
+              <button class="qbtn q-away" data-quick="away">🔵<small>VISITANTE</small></button>
+              <button class="qbtn q-draw" data-quick="draw">🟢<small>EMPATE</small></button>
+            </div>
+            <div class="button-row">
+              <button id="btn-start" class="pill-button">▶</button>
+              <button id="btn-pause" class="ghost-button">⏸</button>
+              <button id="btn-stop" class="ghost-button danger">⏹</button>
+            </div>
+          </div>
+          <div class="panel">
+            <p class="block-label">◔ GAUGES · ÚLTIMOS 100</p>
+            <div class="gauges">
+              <div class="gauge"><div class="dial" id="gg-home"><b id="gg-home-v">—</b></div><small>🟡 MAND</small></div>
+              <div class="gauge"><div class="dial" id="gg-away"><b id="gg-away-v">—</b></div><small>🔵 VISI</small></div>
+              <div class="gauge"><div class="dial" id="gg-draw"><b id="gg-draw-v">—</b></div><small>🟢 EMP</small></div>
+            </div>
+          </div>
+          <div class="panel tend" id="tend-panel">
+            <p class="block-label">⚠ TENDÊNCIA <span id="tend-state">—</span></p>
+            <h3 id="tend-title">Aguardando mesa…</h3>
+            <p id="tend-sub" class="dim">4× seguidos disparam sinal.</p>
+          </div>
+          <div class="panel">
+            <p class="block-label">🕘 ANÁLISE HISTÓRICA · <span id="hist-count">0</span></p>
+            <div id="history-mini" class="hist-mini"></div>
+          </div>
+          <div class="panel">
+            <p class="block-label">🎯 JOGAR</p>
+            <div id="play-chips" class="chips-row"><span class="dim">Sem sinal —</span></div>
+          </div>
+          <div class="panel">
+            <p class="block-label">📜 HISTÓRICO DE SINAIS</p>
+            <div id="signals-mini" class="sigs-mini"><span class="dim">—</span></div>
+          </div>
+        </aside>
+
+        <!-- centro: sinal + orbes -->
+        <section class="col center">
+          <div class="signal-card" id="signal-card" data-active="false">
+            <div class="signal-orb" id="signal-orb">–</div>
+            <div class="signal-info">
+              <h2 id="signal-title">Sem sinal</h2>
+              <p id="signal-sub">Aguardando 4× seguidos…</p>
+              <div class="orbs" id="orbs" aria-label="Últimos resultados"></div>
+            </div>
+            <div class="signal-actions">
+              <button class="pill-button big" id="btn-signal-confirm" hidden>✓ R$ 0,50</button>
+              <button class="ghost-button" id="btn-signal-dismiss" hidden>✕</button>
+              <button class="ghost-button" id="btn-auto-paper" title="Liga/desliga entradas paper automáticas (simulação)">AUTO: OFF</button>
+            </div>
+          </div>
+          <div class="panel">
+            <p class="block-label">● ÚLTIMO RESULTADO</p>
+            <div class="last-result"><span id="last-orb" class="signal-orb">–</span>
+              <div><h3 id="last-name">—</h3><p class="dim mono" id="last-time">—</p></div>
+            </div>
+          </div>
+          <div class="panel limit-panel">
+            <div class="limit-row"><span>Eventos</span><strong class="mono" id="lim-events">0 / 200</strong></div>
+            <div class="bar"><i id="lim-bar"></i></div>
+            <div class="limit-row"><span>PnL</span><strong class="mono" id="lim-pnl">R$ 0,00</strong></div>
+            <div class="limit-row"><span>Tempo</span><strong class="mono" id="lim-time">0 / 60 min</strong></div>
+            <div class="limit-row"><span>Mesa quente</span><strong class="mono" id="lim-hot">—</strong></div>
+            <div id="block-reasons" class="block-reasons" hidden></div>
+          </div>
+        </section>
+
+        <!-- direita: resultados + estatística -->
+        <aside class="col side">
+          <div class="panel">
+            <p class="block-label">◷ RESULTADOS (<span id="res-count">0</span>)</p>
+            <div class="pct-row"><span>🟡 <b id="pct-home">—</b></span><span>🔵 <b id="pct-away">—</b></span><span>🟢 <b id="pct-draw">—</b></span></div>
+            <div class="pct-bars"><i id="pb-home"></i><i id="pb-away"></i><i id="pb-draw"></i></div>
+            <div class="results-grid" id="results-grid" aria-label="Grade de resultados"></div>
+          </div>
+          <div class="panel">
+            <p class="block-label">📊 ANÁLISE ESTATÍSTICA</p>
+            <div class="limit-row"><span>χ² uniformidade</span><strong class="mono" id="st-chi">—</strong></div>
+            <div class="limit-row"><span>Entropia</span><strong class="mono" id="st-ent">—</strong></div>
+            <div class="limit-row"><span>Sequência atual</span><strong class="mono" id="st-streak">—</strong></div>
+            <p class="block-label">🔥 LADOS QUENTES</p>
+            <div id="hot-sides" class="hot"></div>
+          </div>
+        </aside>
       </div>
     </section>
 
-    <section class="section viewer-section" id="blitz-viewer" aria-labelledby="viewer-title">
+    <!-- ══ MESA ════════════════════════════════════════════════════════════ -->
+    <section class="view" data-view="mesa">
       <div class="viewer-heading">
-        <div><p class="section-label">MESA EM OBSERVAÇÃO</p><h2 id="viewer-title">Football Blitz <span class="provider-tag">Pragmatic Play</span></h2></div>
+        <div><p class="section-label">MESA EM OBSERVAÇÃO · PRAGMATIC PLAY</p></div>
         <div class="button-row">
-          <button type="button" class="ghost-button" id="viewer-expand" aria-pressed="false">Ampliar mesa</button>
-          <a class="ghost-button" href="https://www.zonadejogo.bet.br/play/pragmatic/football-blitz" target="_blank" rel="noopener noreferrer">Abrir na Zona de Jogo ↗</a>
+          <button type="button" class="ghost-button" id="viewer-expand" aria-pressed="false">⛶</button>
+          <a class="ghost-button" href="https://www.zonadejogo.bet.br/play/pragmatic/football-blitz" target="_blank" rel="noopener noreferrer">Zona de Jogo ↗</a>
         </div>
       </div>
       <div class="viewer-stage" id="viewer-stage">
         <div class="viewer-placeholder" id="viewer-placeholder">
           <span class="viewer-monogram" aria-hidden="true">FB</span>
-          <h3>Sua mesa, dentro do painel.</h3>
-          <p>Carregue a página oficial da Zona de Jogo para acompanhar o Football Blitz.</p>
-          <button type="button" class="pill-button" id="viewer-load">Carregar jogo</button>
+          <button type="button" class="pill-button" id="viewer-load">▶ Carregar jogo</button>
         </div>
-        <iframe id="blitz-frame" title="Football Blitz — página oficial da Zona de Jogo" hidden allow="fullscreen" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        <iframe id="blitz-frame" title="Football Blitz — Zona de Jogo" hidden allow="fullscreen" referrerpolicy="strict-origin-when-cross-origin"></iframe>
       </div>
-      <div class="viewer-footer">
-        <p id="viewer-status" role="status">Visualização externa pausada.</p>
-        <button type="button" class="ghost-button" id="viewer-close" hidden>Fechar jogo</button>
+      <p id="viewer-status" class="dim" role="status">Visualização externa pausada.</p>
+      <button type="button" class="ghost-button" id="viewer-close" hidden>Fechar jogo</button>
+      <div class="panel">
+        <p class="block-label">● CHRONICLE <span class="mono dim" id="timeline-counter">0 EVENTS</span></p>
+        <div id="timeline" class="timeline"></div>
       </div>
-      <p class="disclaimer">O site pode exigir login ou impedir a exibição incorporada. Nesse caso, use “Abrir na Zona de Jogo”. O frame não importa resultados para o painel; os registros abaixo pertencem à sessão local.</p>
-    </section>
-
-    <!-- ══ PIPELINE · flowchart ══════════════════════════════════════════════ -->
-    <section class="section" id="observatory">
-      <div class="section-head">
-        <span class="section-label">FLUXO OPERACIONAL</span>
-        <h2 class="section-title">Do evento observado à resposta citada.</h2>
+      <div class="panel">
+        <p class="block-label">▤ DISTRIBUIÇÃO</p>
+        <div id="stats-freq" class="freq"></div>
+        <div class="button-row">
+          <a class="ghost-button" href="/api/export?fmt=csv" download>CSV ↓</a>
+          <a class="ghost-button" href="/api/export?fmt=json" download>JSON ↓</a>
+        </div>
       </div>
-      <ol class="pipeline" id="pipeline">
-        <li class="flow-step" data-step="1"><span class="step-num mono">01</span><span class="step-name">OBSERVAR</span><span class="step-desc">evento lido do jogo</span></li>
-        <li class="flow-step" data-step="2"><span class="step-num mono">02</span><span class="step-name">VALIDAR</span><span class="step-desc">travas + limites</span></li>
-        <li class="flow-step" data-step="3"><span class="step-num mono">03</span><span class="step-name">LEDGER</span><span class="step-desc">hash chain append-only</span></li>
-        <li class="flow-step" data-step="4"><span class="step-num mono">04</span><span class="step-name">RAG</span><span class="step-desc">busca + compressão</span></li>
-        <li class="flow-step" data-step="5"><span class="step-num mono">05</span><span class="step-name">ROTEAR</span><span class="step-desc">combo de IA free-first</span></li>
-        <li class="flow-step" data-step="6"><span class="step-num mono">06</span><span class="step-name">RESPONDER</span><span class="step-desc">citações obrigatórias</span></li>
-      </ol>
-    </section>
-
-    <!-- ══ AGENT MESH · semantic graph ═══════════════════════════════════════ -->
-    <section class="section" id="agents">
-      <div class="section-head">
-        <span class="section-label">MALHA DE AGENTES</span>
-        <h2 class="section-title">Quem pensa com você<span class="accent-dot">.</span></h2>
-        <p class="section-body">Componentes do Command Center. Disponibilidade de provedores e execução de agentes precisam de validação própria; conexão do painel não significa IA ativa.</p>
-      </div>
-      <div class="mesh-wrap">
-        <ul class="module-list"><li><strong>Observação</strong><span>Entrada de eventos</span></li><li><strong>Proteção</strong><span>Limites da sessão</span></li><li><strong>Ledger</strong><span>Registro auditável</span></li><li><strong>RAG</strong><span>Consulta ao histórico</span></li><li><strong>Router</strong><span>Configuração remota</span></li><li><strong>Copilot</strong><span>Análise com fontes</span></li></ul>
+      <div class="panel">
+        <p class="block-label">🂡 CONTAGEM DE CARTAS · <span id="cards-count">—</span></p>
+        <div id="cards-dist" class="hot"></div>
+        <p class="disclaimer" id="cards-note">Somente cartas capturadas pelo observer.</p>
       </div>
     </section>
 
-    <!-- ══ OPERATIONS · two-column asymmetric ════════════════════════════════ -->
-    <section class="section" id="operations">
-      <div class="section-head">
-        <span class="section-label">WORKSPACE OPERACIONAL</span>
-        <h2 class="section-title">Operação da sessão.</h2>
-      </div>
-
-      <div class="op-grid">
-        <!-- session + limits -->
-        <div class="op-block">
-          <p class="block-label">PROTEÇÃO DA SESSÃO</p>
-          <div class="limit-row"><span>Eventos hoje</span><strong class="mono" id="lim-events">0 / 200</strong></div>
-          <div class="bar"><i id="lim-bar"></i></div>
-          <div class="limit-row"><span>PnL paper</span><strong class="mono" id="lim-pnl">R$ 0,00</strong></div>
-          <div class="limit-row"><span>Tempo de sessão</span><strong class="mono" id="lim-time">0 / 60 min</strong></div>
-          <div class="limit-row"><span>Mesa quente</span><strong class="mono" id="lim-hot">—</strong></div>
-          <div id="block-reasons" class="block-reasons" hidden></div>
-          <div class="button-row">
-            <button id="btn-start" class="pill-button">▶ INICIAR</button>
-            <button id="btn-pause" class="ghost-button">⏸ PAUSAR</button>
-            <button id="btn-stop" class="ghost-button danger">⏹ PARAR</button>
-          </div>
-        </div>
-
-        <!-- strategy builder -->
-        <div class="op-block">
-          <p class="block-label">STRATEGY BUILDER · HIPÓTESE DESCRITIVA</p>
-          <div class="strategy-flow">
-            <p class="flow-line"><span class="mono step-tag">QUANDO</span> resultado <select id="strategy-color" aria-label="Resultado da hipótese"><option>home</option><option>away</option><option>draw</option></select> aparecer <input id="strategy-run" aria-label="Repetições da hipótese" type="number" value="5" min="1" max="20"> vezes</p>
-            <p class="flow-line"><span class="mono step-tag">ENTÃO</span> abrir observação de <input id="strategy-window" aria-label="Rodadas para observação" type="number" value="3" min="1" max="10"> rodadas para revisão manual</p>
-          </div>
-          <button class="ghost-button" id="save-strategy">SALVAR HIPÓTESE →</button>
-          <p id="strategy-status" class="disclaimer" role="status">Rascunho local. Não executa ações automáticas.</p>
-        </div>
-      </div>
-
-      <!-- ingest -->
-      <div class="op-block ingest">
-        <p class="block-label">OBSERVATION GATE · APPEND-ONLY</p>
-        <form id="event-form" class="ingest-form">
-          <label>RESULTADO<input id="ev-outcome" list="outcome-list" placeholder="home, away, draw…" required></label>
-          <datalist id="outcome-list"><option value="home"><option value="away"><option value="draw"></datalist>
-          <label>ORIGEM<select id="ev-origin"><option value="manual">manual</option><option value="simulated">simulated</option><option value="fixture">fixture</option></select></label>
-          <label>PNL PAPER<input id="ev-pnl" type="number" step="0.01" placeholder="opcional"></label>
-          <button class="pill-button" type="submit">REGISTRAR →</button>
-        </form>
-      </div>
-    </section>
-
-    <!-- ══ AUDIT · timeline + stats + game ═══════════════════════════════════ -->
-    <section class="section" id="audit">
-      <div class="section-head">
-        <span class="section-label">HISTÓRICO AUDITÁVEL</span>
-        <h2 class="section-title">Tudo que aconteceu<span class="accent-dot">.</span></h2>
-        <span class="section-muted mono" id="timeline-counter">0 EVENTS</span>
-      </div>
-
-      <div class="audit-grid">
-        <div class="op-block timeline-block">
-          <p class="block-label">CHRONICLE <b class="live-badge compact">● LIVE</b></p>
-          <div id="timeline" class="timeline"></div>
-        </div>
-        <div class="op-block">
-          <p class="block-label">DISTRIBUIÇÃO OBSERVADA</p>
-          <div id="stats-freq" class="freq"></div>
-          <p class="disclaimer">Histórico não é previsão. Amostra pequena = incerteza alta.</p>
-          <div class="button-row">
-            <a class="ghost-button" href="/api/export?fmt=csv" download>CSV ↓</a>
-            <a class="ghost-button" href="/api/export?fmt=json" download>JSON ↓</a>
-          </div>
-        </div>
-      </div>
-
-      <!-- Game Center -->
+    <!-- ══ PAPEL ═══════════════════════════════════════════════════════════ -->
+    <section class="view" data-view="papel">
       <div class="op-block game">
-        <p class="block-label">GAME CENTER · PAPER <mark>NENHUMA APOSTA REAL</mark></p>
+        <p class="block-label">⛁ GAME CENTER · PAPER <mark>NENHUMA APOSTA REAL</mark></p>
         <div class="game-stats">
-          <div><small>BANCA PAPER</small><strong class="mono" id="g-balance">R$ 200,00</strong></div>
-          <div><small>PNL TOTAL</small><strong class="mono" id="g-pnl">R$ 0,00</strong></div>
+          <div><small>BANCA</small><strong class="mono" id="g-balance">R$ 200,00</strong></div>
+          <div><small>PNL</small><strong class="mono" id="g-pnl">R$ 0,00</strong></div>
           <div><small>ROI</small><strong class="mono" id="g-roi">0%</strong></div>
           <div><small>ABERTAS</small><strong class="mono" id="g-open">0</strong></div>
         </div>
         <form id="bet-form" class="bet-form">
-          <select id="bet-type"><option value="home">Home (1:1)</option><option value="away">Away (1:1)</option><option value="draw">Draw (11:1)</option><option value="spread_h">Spread Home</option><option value="spread_a">Spread Away</option></select>
-          <input id="bet-stake" type="number" min="0.5" max="100" step="0.5" value="2.50">
-          <button class="pill-button" type="submit">REGISTRAR PAPER</button>
+          <select id="bet-type" aria-label="Lado"><option value="home">🟡 MANDANTE (1:1)</option><option value="away">🔵 VISITANTE (1:1)</option><option value="draw">🟢 EMPATE (11:1)</option><option value="spread_h">Spread Mandante</option><option value="spread_a">Spread Visitante</option></select>
+          <input id="bet-stake" type="number" min="0.5" max="100" step="0.5" value="0.50" aria-label="Stake">
+          <button class="pill-button" type="submit">✓</button>
         </form>
+        <div class="button-row" id="chip-row" aria-label="Fichas rápidas">
+          <button type="button" class="ghost-button chip" data-stake="0.5">0,50</button>
+          <button type="button" class="ghost-button chip" data-stake="1">1</button>
+          <button type="button" class="ghost-button chip" data-stake="2.5">2,50</button>
+          <button type="button" class="ghost-button chip" data-stake="5">5</button>
+          <button type="button" class="ghost-button chip" data-stake="10">10</button>
+        </div>
         <div class="bets-cols">
           <div><small class="mono">ABERTAS</small><div id="g-open-list" class="bet-list"></div></div>
           <div><small class="mono">RESOLVIDAS</small><div id="g-settled-list" class="bet-list"></div></div>
         </div>
-        <details class="sim-box"><summary class="mono">REPLAY MONTE CARLO · SAPATO 8 BARALHOS</summary>
+      </div>
+    </section>
+
+    <!-- ══ RISCO ═══════════════════════════════════════════════════════════ -->
+    <section class="view" data-view="risco">
+      <div class="op-block risk" id="risk-panel">
+        <p class="block-label">⚠ CONTROLE DE RISCO · PAPER <mark>SEM GARANTIA</mark></p>
+        <div class="game-stats">
+          <div><small>AMOSTRA</small><strong class="mono" id="r-n">—</strong></div>
+          <div><small>EV HOME</small><strong class="mono" id="r-ev">—</strong></div>
+          <div><small>DRAWDOWN</small><strong class="mono" id="r-dd">—</strong></div>
+          <div><small>SEQUÊNCIA</small><strong class="mono" id="r-streak">—</strong></div>
+        </div>
+        <div class="limit-row expert-only"><span>Frequências</span><strong class="mono" id="r-freq">—</strong></div>
+        <div class="limit-row expert-only"><span>Uniformidade χ²</span><strong class="mono" id="r-chi">—</strong></div>
+        <div class="limit-row expert-only"><span>Entropia</span><strong class="mono" id="r-ent">—</strong></div>
+        <div class="limit-row expert-only"><span>P(4 perdas em 200)</span><strong class="mono" id="r-p4">—</strong></div>
+        <div class="limit-row"><span>Plano 2.50 +3M</span><strong class="mono" id="r-mg">—</strong></div>
+        <p id="risk-warning" class="disclaimer" role="status">Carregando risco…</p>
+        <div class="button-row">
+          <button class="ghost-button" id="btn-risk-refresh">↻</button>
+        </div>
+        <details class="sim-box"><summary class="mono">▸ REPLAY MONTE CARLO</summary>
           <form id="sim-form"><input id="sim-shoes" type="number" min="1" max="2000" value="200"><button class="ghost-button" type="submit">RODAR</button></form>
           <pre id="sim-out" class="mono sim-out"></pre>
         </details>
       </div>
+    </section>
 
-      <!-- Copilot -->
+    <!-- ══ BRAIN ═════════════════════════════════════════════════════════ -->
+    <section class="view" data-view="brain">
+      <div class="panel brain-top">
+        <div class="radar" id="health-radar" aria-label="Saúde dos serviços">
+          <span class="rdot" id="hr-api" title="API backend">API</span>
+          <span class="rdot" id="hr-ws" title="Canal WebSocket">WS</span>
+          <span class="rdot" id="hr-ledger" title="Ledger hash-chain">LEDGER</span>
+          <span class="rdot" id="hr-risk" title="Amostra de risco">RISCO</span>
+        </div>
+        <span class="chip mono" id="brain-mode">PAPER</span>
+        <span class="chip mono dim" id="brain-ms">—</span>
+        <div class="button-row">
+          <button class="ghost-button" id="btn-mode" title="Alternar modo simples/especialista">◐ SIMPLES</button>
+          <button class="ghost-button" id="btn-tour" title="Tour guiado">❓ TOUR</button>
+        </div>
+      </div>
+      <div class="cols2">
+        <div class="panel">
+          <p class="block-label">⛨ GRAFO DE AGENTES · <span id="agents-count">—</span></p>
+          <div id="agents-loading" class="dim">Carregando agentes…</div>
+          <div id="agents-error" class="error-box" hidden></div>
+          <svg id="agent-graph" viewBox="0 0 340 240" role="img" aria-label="Grafo de agentes e dependências"></svg>
+          <div id="agents-grid" class="agents-grid"></div>
+        </div>
+        <div>
+          <div class="panel" id="agent-detail" hidden>
+            <p class="block-label">🔍 <span id="ad-name">—</span></p>
+            <p id="ad-role" class="dim"></p>
+            <div class="limit-row"><span>Estado</span><strong class="mono" id="ad-state">—</strong></div>
+            <div class="limit-row"><span>Tarefa</span><strong class="mono" id="ad-task">—</strong></div>
+            <div class="limit-row"><span>Confiança</span><strong class="mono" id="ad-conf">—</strong></div>
+            <div class="limit-row"><span>Fila</span><strong class="mono" id="ad-queue">—</strong></div>
+            <p id="ad-detail" class="disclaimer"></p>
+            <div class="button-row">
+              <button class="ghost-button" id="btn-ad-evidence">EVIDÊNCIA</button>
+              <button class="ghost-button" id="btn-ad-close">FECHAR</button>
+            </div>
+          </div>
+          <div class="panel">
+            <p class="block-label">❓ POR QUE ISSO ACONTECEU?</p>
+            <div id="why-box" class="why"><span class="dim">Toque POR QUÊ para explicar o estado atual.</span></div>
+            <div class="button-row">
+              <button class="ghost-button" id="btn-why" title="Explicar a decisão atual">POR QUÊ?</button>
+              <button class="ghost-button" id="btn-evidence" title="Mostrar evidência na timeline">EVIDÊNCIA</button>
+              <button class="ghost-button" id="btn-math" title="Abrir matemática">MATEMÁTICA</button>
+            </div>
+          </div>
+          <div class="panel">
+            <p class="block-label">🔔 NOTIFICAÇÕES <span id="notif-count" class="mono dim">0</span></p>
+            <div class="button-row">
+              <button class="ghost-button" id="btn-mute" title="Silenciar som">🔊</button>
+              <button class="ghost-button" id="btn-clear-n" title="Limpar notificações">LIMPAR</button>
+            </div>
+            <div id="notif-center" class="notifs" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ MAIS ════════════════════════════════════════════════════════════ -->
+    <section class="view" data-view="mais">
+      <div class="op-block">
+        <p class="block-label">◈ HIPÓTESE DESCRITIVA</p>
+        <div class="strategy-flow">
+          <p class="flow-line"><span class="mono step-tag">QUANDO</span> <select id="strategy-color" aria-label="Resultado da hipótese"><option value="home">🟡 MANDANTE</option><option value="away">🔵 VISITANTE</option><option value="draw">🟢 EMPATE</option></select> × <input id="strategy-run" aria-label="Repetições" type="number" value="5" min="1" max="20"></p>
+          <p class="flow-line"><span class="mono step-tag">ENTÃO</span> observar <input id="strategy-window" aria-label="Rodadas" type="number" value="3" min="1" max="10"> rodadas</p>
+        </div>
+        <button class="ghost-button" id="save-strategy">SALVAR →</button>
+        <p id="strategy-status" class="disclaimer" role="status">Rascunho local. Sem execução automática.</p>
+      </div>
+      <div class="op-block ingest">
+        <p class="block-label">＋ REGISTRO MANUAL</p>
+        <form id="event-form" class="ingest-form">
+          <label>RESULTADO<input id="ev-outcome" list="outcome-list" placeholder="mandante…" required></label>
+          <datalist id="outcome-list"><option value="mandante"><option value="visitante"><option value="empate"><option value="home"><option value="away"><option value="draw"></datalist>
+          <label>ORIGEM<select id="ev-origin"><option value="manual">manual</option><option value="simulated">simulated</option><option value="fixture">fixture</option></select></label>
+          <label>PNL<input id="ev-pnl" type="number" step="0.01" placeholder="opcional"></label>
+          <button class="pill-button" type="submit">✓</button>
+        </form>
+      </div>
       <div class="op-block copilot" id="copilot">
-        <p class="block-label">HERMES · IA GOVERNADA · CITAÇÕES OBRIGATÓRIAS</p>
-        <form id="copilot-form"><input id="copilot-q" placeholder="Pergunte sobre eventos, sequência ou sessão…" required><button class="pill-button" type="submit">✦ ANALISAR</button></form>
+        <p class="block-label">✦ HERMES · IA DESCRITIVA</p>
+        <form id="copilot-form"><input id="copilot-q" placeholder="Pergunte…" required><button class="pill-button" type="submit">✦</button></form>
         <div id="copilot-answer" class="copilot-answer"></div>
-        <p class="disclaimer">A IA descreve dados internos. Não aposta, não decide e não promete lucro.</p>
+      </div>
+      <div class="panel expert-only">
+        <p class="block-label">⇄ FLUXO</p>
+        <ol class="pipeline" id="pipeline">
+          <li class="flow-step" data-step="1"><span class="step-num mono">01</span><span class="step-name">OBSERVAR</span></li>
+          <li class="flow-step" data-step="2"><span class="step-num mono">02</span><span class="step-name">VALIDAR</span></li>
+          <li class="flow-step" data-step="3"><span class="step-num mono">03</span><span class="step-name">LEDGER</span></li>
+          <li class="flow-step" data-step="4"><span class="step-num mono">04</span><span class="step-name">RAG</span></li>
+          <li class="flow-step" data-step="5"><span class="step-num mono">05</span><span class="step-name">ROTEAR</span></li>
+          <li class="flow-step" data-step="6"><span class="step-num mono">06</span><span class="step-name">RESPONDER</span></li>
+        </ol>
+      </div>
+      <div class="panel">
+        <p class="block-label">⛨ MALHA · PAPER · 18+ · SEM AUTO-EXECUÇÃO</p>
+        <ul class="module-list"><li><strong>Observação</strong><span>Entrada</span></li><li><strong>Proteção</strong><span>Limites</span></li><li><strong>Ledger</strong><span>Auditável</span></li><li><strong>RAG</strong><span>Histórico</span></li><li><strong>Router</strong><span>Remoto</span></li><li><strong>Copilot</strong><span>Fontes</span></li></ul>
       </div>
     </section>
   </main>
 
+  <!-- tabbar mobile -->
+  <nav class="tabbar" aria-label="Navegação">
+    <button class="active" data-tab="sinal">◉<small>SINAL</small></button>
+    <button data-tab="mesa">▦<small>MESA</small></button>
+    <button data-tab="papel">⛁<small>PAPEL</small></button>
+    <button data-tab="risco">⚠<small>RISCO</small></button>
+    <button data-tab="brain">⛨<small>BRAIN</small></button>
+    <button data-tab="mais">⋯<small>MAIS</small></button>
+  </nav>
+
   <div id="toast" role="status" aria-live="polite"></div>
+  <!-- holograma scan · cartas do giro exato -->
+  <div id="hologram" class="hologram" aria-live="polite" title="Cartas observadas no giro">
+    <span class="holo-label">SCAN</span>
+    <span class="holo-cards"><b id="holo-home">–</b><i>×</i><b id="holo-away">–</b></span>
+    <span class="holo-out" id="holo-out">—</span>
+  </div>
+  <div id="signal-popup" class="signal-popup" hidden role="alertdialog" aria-label="Sinal">
+    <div class="signal-popup-box">
+      <div class="signal-orb big" id="popup-orb">–</div>
+      <p id="popup-text">Sinal</p>
+      <div class="button-row">
+        <button class="pill-button big" id="btn-popup-confirm">✓ R$ 0,50</button>
+        <button class="ghost-button" id="btn-popup-dismiss">✕</button>
+      </div>
+    </div>
+  </div>
   <div id="ws-status" class="ws-status mono">ws: conectando…</div>
   <span id="omniroute-pill" hidden></span>
 
-  <footer class="site-footer">
-    <span>BLITZ SCANNER · MODO PAPER · 18+</span>
-    <span class="mono">local-first · auditável · sem auto-execução</span>
-  </footer>
+  <!-- paleta de comandos -->
+  <div id="palette" class="palette" hidden role="dialog" aria-label="Paleta de comandos">
+    <input id="palette-input" placeholder="digite: sinal, mesa, iniciar, mandante…" aria-label="Comando">
+    <div id="palette-list" class="palette-list"></div>
+  </div>
+  <!-- tour -->
+  <div id="tour" class="tour" hidden role="dialog" aria-label="Tour guiado">
+    <div class="tour-box">
+      <h3 id="tour-title">Tour</h3>
+      <p id="tour-text"></p>
+      <div class="button-row">
+        <button class="ghost-button" id="btn-tour-back">←</button>
+        <button class="pill-button" id="btn-tour-next">→</button>
+        <button class="ghost-button" id="btn-tour-done">SAIR</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/vendor/dialkit/browser.global.js"></script>
   <script src="/app.js"></script>

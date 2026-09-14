@@ -80,8 +80,10 @@
     function extractOutcome(text) {
       if (!text) return null;
       const t = text.trim().toLowerCase();
-      if (["home", "away", "draw", "empate", "casa", "fora"].includes(t)) {
-        return t === "empate" ? "draw" : t === "casa" ? "home" : t === "fora" ? "away" : t;
+      if (["home", "away", "draw", "empate", "casa", "fora", "mandante", "visitante"].includes(t)) {
+        if (t === "empate" || t === "draw") return "draw";
+        if (t === "casa" || t === "mandante" || t === "home") return "home";
+        return "away";
       }
       // card values: "H 7", "A K", "7 x 9", "Kx7"… (A=1 low, J=11 Q=12 K=13)
       const cardVal = (c) => {

@@ -18,6 +18,15 @@ from pydantic import BaseModel, Field, field_validator
 
 import ledger as ledger_mod
 from config import BASE_DIR, HOT_STREAK_ALERT, OMNIROUTE_HEALTH, OBSERVER_TOKEN
+from config import MAX_EVENTS_PER_DAY
+import risk as risk_mod
+import martingale_risk_analysis as mg_mod
+import progression as prog_mod
+
+# AUTO-PAPER (simulation only, default OFF). When ON, each new observed
+# outcome may open ONE paper bet following the anti-streak rule + ladder.
+# Never touches real money, browser betting or Telegram orders.
+AUTO = {"enabled": False, "last_anchor": None}
 from ledger import Ledger
 from policy import PolicyEngine
 from rag import RAGIndex
@@ -28,7 +37,10 @@ from telegram_notify import notifier
 from entry_validation import validate_outcome, validate_bet_entry
 from entry_dedup import dedup_check, confirm_two_step, fingerprint
 
-app = FastAPI(title="Football Blitz Command Center", version="2.0.0")
+app = FastAPI(title="Football Blitz Command Center", version="2.1.0")
+
+BUILD_VERSION = "2.1.0-real-system"
+BUILD_GIT = "1012702"
 
 db = Ledger()
 policy = PolicyEngine(db)
@@ -148,6 +160,10 @@ class SessionIn(BaseModel):
     note: str = Field(default="", max_length=300)
 
 
+class AutoIn(BaseModel):
+    enabled: bool
+
+
 class HypothesisIn(BaseModel):
     text: str = Field(min_length=8, max_length=400)
     params: dict = Field(default_factory=dict)
@@ -169,7 +185,315 @@ def health():
         "chain_integrity": chain,
         "omniroute": OMNIROUTE_HEALTH,
         "ninerouter": NINEROUTER_HEALTH,
+        "version": BUILD_VERSION,
     }
+
+
+@app.get("/ready")
+def ready():
+    chain = db.verify_chain()
+    ok = all(chain.values())
+    return {
+        "ready": bool(ok),
+        "version": BUILD_VERSION,
+        "git": BUILD_GIT,
+        "chain": chain,
+        "mode": "PAPER",
+    }
+
+
+@app.get("/api/version")
+def version():
+    return {"version": BUILD_VERSION, "git": BUILD_GIT, "mode": "PAPER"}
+
+
+# ── Signals (PAPER, visual 1-click) ────────────────────────────────────
+# Regra anti-sequência: 4× MANDANTE seguidos → sinal VISITANTE 0.50;
+# 4× VISITANTE seguidos → sinal MANDANTE 0.50. Empate quebra a sequência.
+# Sinal é visual/educacional — nunca aposta sozinho.
+ANTI_STREAK_RUN = 4
+
+
+def ladder_now() -> dict:
+    """Current ladder position from consecutive settled paper results (newest first)."""
+    try:
+        recent = game.recent_bets(12)
+        statuses = [b["status"] for b in recent]
+    except Exception:
+        statuses = []
+    return prog_mod.level_from_statuses(statuses)
+
+
+def toggle_auto(enabled: bool) -> dict:
+    AUTO["enabled"] = bool(enabled)
+    if not enabled:
+        AUTO["last_anchor"] = None
+    db.audit("auto_paper", f"auto-paper {'ON' if enabled else 'OFF'} (simulation)")
+    return {"auto_paper": AUTO["enabled"]}
+
+
+def maybe_auto_paper() -> dict | None:
+    """One auto PAPER bet per fresh 4x streak. Returns bet or None."""
+    if not AUTO["enabled"]:
+        return None
+    active = db.active_session()
+    if not active:
+        sid = policy.start(note="auto-paper-rotation")
+        db.audit("auto_paper", f"nova sessão rotacionada {sid[:8]} (PAPER)")
+        active = db.get_session(sid)
+    else:
+        chk0 = policy.check(active["session_id"])
+        if any("session time limit" in r for r in chk0["reasons"]):
+            db.end_session(active["session_id"])
+            sid = policy.start(note="auto-paper-rotation")
+            db.audit("auto_paper", f"sessão expirada, rotacionada {sid[:8]} (PAPER)")
+            active = db.get_session(sid)
+    sid = active["session_id"]
+    check = policy.check(sid)
+    if not check["allowed"]:
+        return None
+    try:
+        if game.open_bets():
+            return None
+        today = datetime.now(timezone.utc).date().isoformat()
+        today_bets = [b for b in game.recent_bets(500)
+                      if (b.get("opened_at", "")[:10] == today)]
+        if len(today_bets) >= 200:
+            AUTO["enabled"] = False
+            db.audit("auto_paper", "limite 200/dia: auto-paper DESLIGADO")
+            return None
+        # conta perdas consecutivas (para no 1º win/push)
+        consec = 0
+        for b in game.recent_bets(12):
+            if b["status"] == "lost":
+                consec += 1
+            elif b["status"] in ("won", "push"):
+                break
+        if consec >= 8:
+            AUTO["enabled"] = False
+            db.audit("auto_paper", f"loss-streak {consec}: auto-paper DESLIGADO")
+            return None
+    except Exception:
+        return None
+    evs = db.last_events(60)
+    streak_out, run = None, 0
+    for e in reversed(evs[-60:]):
+        o = e["outcome"]
+        if o not in ("home", "away"):
+            break
+        if streak_out is None:
+            streak_out, run = o, 1
+        elif o == streak_out:
+            run += 1
+        else:
+            break
+    if not (streak_out and run >= ANTI_STREAK_RUN) or not evs:
+        return None
+    anchor = evs[-1]["event_id"]
+    if anchor == AUTO["last_anchor"]:
+        return None
+    side = "away" if streak_out == "home" else "home"
+    lad = ladder_now()
+    try:
+        bet = game.open_bet(sid, side, lad["stake"])
+    except ValueError:
+        return None
+    AUTO["last_anchor"] = anchor
+    db.audit("auto_paper", f"{side} R$ {lad['stake']:.2f} nível {lad['level']}/5 (sinal {anchor[:8]})")
+    return {"bet": bet, "ladder": lad, "anchor": anchor[:12]}
+SIGNAL_STAKE = 0.50
+
+
+@app.get("/api/signals/current")
+def signal_current():
+    evs = db.last_events(200)
+    decisive = [e for e in evs if e["outcome"] in ("home", "away")]
+    streak_out, run = None, 0
+    # streak conta eventos consecutivos no ledger (empate quebra)
+    for e in reversed(evs[-60:]):
+        o = e["outcome"]
+        if o not in ("home", "away"):
+            break
+        if streak_out is None:
+            streak_out, run = o, 1
+        elif o == streak_out:
+            run += 1
+        else:
+            break
+    orbs = [e["outcome"] for e in evs[-20:]]
+    if streak_out and run >= ANTI_STREAK_RUN:
+        side = "away" if streak_out == "home" else "home"
+        fr = risk_mod.freq_relative([e["outcome"] for e in decisive]) if decisive else {}
+        anchor = evs[-1]["event_id"] if evs else "none"
+        lad = ladder_now()
+        return {
+            "signal": True,
+            "signal_id": f"anti4-{anchor[:12]}",
+            "rule": f"anti-streak-{ANTI_STREAK_RUN}",
+            "base_outcome": streak_out,
+            "run": run,
+            "side": side,
+            "stake": lad["stake"],
+            "ladder": lad,
+            "auto_paper": AUTO["enabled"],
+            "n_decisive": len(decisive),
+            "n_decisive": len(decisive),
+            "freq": {k: round(v, 3) for k, v in fr.items()},
+            "orbs": orbs,
+            "mode": "PAPER",
+            "note": "Sinal visual. Confirme manualmente — 1 clique registra paper.",
+        }
+    return {"signal": False, "run": run, "base_outcome": streak_out,
+            "orbs": orbs, "mode": "PAPER"}
+# ── Agents Brain (PAPER, dados reais) ────────────────────────────────────
+# Personalidades funcionais mapeadas a subsistemas reais. Sem métrica
+# inventada: tokens/latência de modelo = null (n/d); confiança sempre com n.
+@app.get("/api/agents/status")
+def agents_status():
+    import time as _t
+    t0 = _t.monotonic()
+    evs = db.last_events(60)
+    outs = [e["outcome"] for e in evs if e["outcome"] in ("home", "away", "draw")]
+    check = policy.check()
+    usage = check["usage"]
+    try:
+        open_bets = game.open_bets()
+        recent = game.recent_bets(5)
+        balance = game.balance()
+    except Exception:
+        open_bets, recent, balance = [], [], None
+    ws_clients = broadcaster.count
+    rag_chunks = len(rag.chunks)
+    last = evs[-1] if evs else None
+    # streak atual
+    run, cur = 0, outs[-1] if outs else None
+    for o in reversed(outs):
+        if o == cur:
+            run += 1
+        else:
+            break
+    blocked = not check["allowed"]
+    state_session = check["state"]
+
+    def ev(e):
+        return {"event_id": e["event_id"][:12], "outcome": e["outcome"],
+                "origin": e["data_origin"], "at": e.get("observed_at", "")} if e else None
+
+    agents = [
+        {"id": "observador", "nome": "Sentinela", "funcao": "Monitor",
+         "personalidade": "Acompanha saúde, canal e capturas. Só observa.",
+         "estado": "alerta" if ws_clients == 0 else "aprovado",
+         "tarefa": f"{ws_clients} cliente(s) no canal",
+         "ultima_acao": ev(last),
+         "confianca": None, "latencia_ms": None, "tokens": None,
+         "fila": 0, "detalhe": "MutationObserver no jogo → /ws → ledger"},
+        {"id": "analista", "nome": "Prisma", "funcao": "Analista",
+         "personalidade": "Explica padrões e incertezas. Nunca afirma sem amostra.",
+         "estado": "aguardando" if len(outs) < 4 else ("analisando" if run < 4 else "aprovado"),
+         "tarefa": f"sequência atual: {cur} ×{run}" if cur else "aguardando eventos",
+         "ultima_acao": ev(last),
+         "confianca": {"n": len(outs), "nota": "n<60: sem conclusão"},
+         "latencia_ms": None, "tokens": None,
+         "fila": 0, "detalhe": f"{len(outs)} eventos na janela"},
+        {"id": "matematico", "nome": "QED", "funcao": "Matemático",
+         "personalidade": "Valida probabilidade, entropia e risco. Exige intervalo.",
+         "estado": "aguardando" if len(outs) < 60 else "analisando",
+         "tarefa": f"amostra n={len(outs)} (mín. 60)",
+         "ultima_acao": ev(last),
+         "confianca": risk_mod.wilson_ci(
+             sum(1 for o in outs if o == "home"), len(outs)) if outs else None,
+         "latencia_ms": None, "tokens": None,
+         "fila": 0, "detalhe": "χ², entropia e EV em /api/risk/summary"},
+        {"id": "executor", "nome": "Atlas", "funcao": "Executor",
+         "personalidade": "Mostra ações simuladas e estados. Nunca executa real.",
+         "estado": "analisando" if open_bets else ("concluido" if recent else "aguardando"),
+         "tarefa": f"{len(open_bets)} paper aberta(s)",
+         "ultima_acao": {"bet": recent[0]["bet_type"], "stake": recent[0]["stake"],
+                         "status": recent[0]["status"]} if recent else None,
+         "confianca": None, "latencia_ms": None, "tokens": None,
+         "fila": len(open_bets), "detalhe": f"banca paper R$ {balance}"},
+        {"id": "memoria", "nome": "Mnemos", "funcao": "Memória",
+         "personalidade": "Mostra contexto e evidências recuperadas, com fonte.",
+         "estado": "aprovado" if rag_chunks else "falha",
+         "tarefa": f"{rag_chunks} fragmentos indexados",
+         "ultima_acao": None,
+         "confianca": None, "latencia_ms": None, "tokens": None,
+         "fila": 0, "detalhe": "RAG TF-IDF local + eventos da sessão"},
+        {"id": "seguranca", "nome": "Égide", "funcao": "Segurança",
+         "personalidade": "Bloqueia o perigoso. Travas sempre ligadas.",
+         "estado": "bloqueado" if blocked else "aprovado",
+         "tarefa": f"sessão {state_session}",
+         "ultima_acao": {"motivos": check["reasons"][:3]} if blocked else None,
+         "confianca": None, "latencia_ms": None, "tokens": None,
+         "fila": 0, "detalhe": "200/dia · loss-streak · stop-loss · kill-switch"},
+        {"id": "coordenador", "nome": "Maestro", "funcao": "Coordenador",
+         "personalidade": "Apresenta o fluxo geral e dependências.",
+         "estado": "pausado" if state_session in ("COOLDOWN", "STOPPED") else "analisando",
+         "tarefa": "observar→validar→ledger→sinal",
+         "ultima_acao": ev(last),
+         "confianca": None, "latencia_ms": None, "tokens": None,
+         "fila": len(open_bets), "detalhe": f"{usage['events_today']}/{usage['daily_limit']} eventos hoje"},
+    ]
+    ms = int((_t.monotonic() - t0) * 1000)
+    return {"agents": agents, "coleta_ms": ms, "mode": "PAPER",
+            "nota": "tokens e latência de modelo: n/d (sem chamada LLM neste ciclo)"}
+# ── Cards (observado via DOM, pode ser n/d) ────────────────────────────────
+@app.get("/api/cards/summary")
+def cards_summary(n: int = 200):
+    evs = db.last_events(min(max(n, 10), 1000))
+    seen: dict[str, int] = {}
+    with_cards = 0
+    for e in evs:
+        try:
+            meta = json.loads(e.get("metadata") or "{}")
+        except ValueError:
+            continue
+        for k in ("home_card", "away_card"):
+            v = (meta.get(k) or "").upper()
+            if v:
+                seen[v] = seen.get(v, 0) + 1
+                with_cards += 0  # conta por carta abaixo
+        if meta.get("home_card") or meta.get("away_card"):
+            with_cards += 1
+    return {"counts": dict(sorted(seen.items())),
+            "rounds_with_cards": with_cards, "rounds": len(evs),
+            "mode": "PAPER",
+            "note": "Cartas lidas do DOM quando visíveis; n/d = observer não capturou. Sapato 8 baralhos c/ reshuffle ~50%: contagem parcial, sem edge assumido."}
+# ── Risk (PAPER, educacional) ────────────────────────────────────────────
+@app.get("/api/risk/summary")
+def risk_summary(n: int = 200):
+    evs = db.last_events(min(max(n, 10), 1000))
+    outcomes = [e["outcome"] for e in evs if e["outcome"] in ("home", "away", "draw")]
+    pnls = []
+    try:
+        for b in game.recent_bets(500):
+            if b["status"] in ("won", "lost", "push"):
+                pnls.append(float(b.get("pnl", 0.0)))
+    except Exception:
+        pnls = []
+    s = risk_mod.summarize_session(outcomes, pnls)
+    # EV estimado por entrada home/away (1:1, push_half no draw) e draw (11:1)
+    fr = s["freq"]
+    s["ev_home"] = risk_mod.ev_per_entry(fr.get("home", 0), 1.0,
+                                         p_push=fr.get("draw", 0), push_return=-0.5)
+    s["ev_draw"] = risk_mod.ev_per_entry(fr.get("draw", 0), 11.0)
+    s["p_4loss_in_200"] = risk_mod.prob_k_losses_in_n(0.55, 200, 4)
+    s["kelly_home"] = risk_mod.kelly_fraction(fr.get("home", 0), 1.0)
+    s["mode"] = "PAPER"
+    s["warning"] = ("Sem vantagem estatística confiável" if s["n"] < 60
+                    else "Amostra em análise — não é recomendação")
+    return s
+
+
+@app.get("/api/risk/progression")
+def risk_progression(base: float = 2.5, levels: int = 3):
+    if base <= 0 or base > 100 or levels < 0 or levels > 6:
+        raise HTTPException(422, "base 0..100, levels 0..6")
+    plan = mg_mod.cycle_plan(base=base, levels=levels)
+    sim = mg_mod.simulate(base=base, levels=levels)
+    return {"plan": plan, "simulation_paper": sim, "mode": "PAPER_EDUCATIONAL",
+            "ladder_live": prog_mod.LADDER, "ladder_exposure": prog_mod.total_exposure(),
+            "note": "Demonstra risco. Não executa apostas."}
 
 
 @app.get("/api/state")
@@ -179,10 +503,18 @@ def state():
     return {
         "mode": "PAPER",
         "auto_execution": False,
+        "auto_paper": AUTO["enabled"],
+        "ladder": ladder_now(),
         "state": check["state"],
         "check": check,
         "session": active,
     }
+
+
+@app.post("/api/session/auto")
+def session_auto(body: AutoIn):
+    """Liga/desliga AUTO-PAPER (simulation). Nunca aposta real."""
+    return toggle_auto(body.enabled)
 
 
 @app.post("/api/session/start")
@@ -271,8 +603,10 @@ def add_event(body: EventIn):
     blocking = [r for r in check["reasons"] if "HOT" not in r]
     if not check["allowed"] and blocking:
         notifier.blocked(blocking)
+    auto = maybe_auto_paper()
     return {"ok": True, **result, "policy_state": check["state"], "hot_streak": hot,
-            "settled_bets": len(settled)}
+            "settled_bets": len(settled),
+            "auto_paper": {"bet": auto["bet"], "ladder": auto["ladder"]} if auto else None}
 
 
 # ── WebSocket live channel ─────────────────────────────────────────────────
@@ -315,11 +649,14 @@ async def ws_endpoint(ws: WebSocket, token: str | None = Query(default=None)):
                         data_origin="authorized_readonly",
                         parser_version=parser,
                         round_id=msg.get("round_id"),
-                        metadata={"raw": raw},
+                        metadata={"raw": raw,
+                                  "home_card": msg.get("home_card"),
+                                  "away_card": msg.get("away_card")},
                     )
                     ev = db.last_events(1)[0]
                     broadcaster.broadcast("event", {"event": ev})
                     game.settle(ev["outcome"])
+                    maybe_auto_paper()
                 except ValueError:
                     pass  # invalid outcome string etc.
             elif kind == "ping":
@@ -374,6 +711,7 @@ def ingest(body: IngestIn, token: str | None = None):
         last = db.last_events(1)[0]
         broadcaster.broadcast("event", {"event": last})
         settled = game.settle(last["outcome"])
+        maybe_auto_paper()
     return {"accepted": accepted, "rejected": rejected}
 
 
@@ -398,6 +736,24 @@ def game_bet(body: BetIn):
     active = db.active_session()
     if not active:
         raise HTTPException(409, "no active session — start one first")
+    # RISK: hard cap 200 paper bets/day (server-side, never trust client)
+    today_bets = [b for b in game.recent_bets(500)
+                  if (b.get("opened_at", "")[:10] ==
+                      datetime.now(timezone.utc).date().isoformat())]
+    if len(today_bets) >= 200:
+        db.audit("paper_bet_rejected", "limite diário 200 apostas paper atingido")
+        raise HTTPException(423, {"error": "limite diário 200 atingido", "reasons": ["DAILY_BET_LIMIT"]})
+    # RISK: loss-streak breaker — 2 ciclos martingale (~R$75) = stop
+    recent = game.recent_bets(12)
+    consec_losses = 0
+    for b in recent:
+        if b["status"] == "lost":
+            consec_losses += 1
+        elif b["status"] in ("won", "push"):
+            break
+    if consec_losses >= 8:
+        db.audit("paper_bet_rejected", f"loss-streak {consec_losses} — stop loss sessão")
+        raise HTTPException(423, {"error": "loss-streak breaker", "reasons": [f"{consec_losses} perdas seguidas"]})
     check = policy.check(active["session_id"])
     # VALIDACAO REAL da entrada (portão único): tipo, stake, banca, policy
     gate = validate_bet_entry(body.bet_type, body.stake, game.balance(),
@@ -613,6 +969,16 @@ def app_js():
 @app.get("/app.css")
 def app_css():
     return FileResponse(WEB_DIR / "app.css")
+
+
+@app.get("/manifest.webmanifest")
+def manifest():
+    return FileResponse(WEB_DIR / "manifest.webmanifest")
+
+
+@app.get("/blitz-icon.svg")
+def blitz_icon():
+    return FileResponse(WEB_DIR / "blitz-icon.svg")
 
 
 @app.get("/vendor/dialkit/{file_name}")
