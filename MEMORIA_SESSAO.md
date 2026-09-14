@@ -10,6 +10,13 @@ Data: 2026-09-12 · Backend v2.1.0-real-system · 63 testes verdes · Modo PAPER
 - `BUILD_GIT` é hardcoded em `server.py:43` — o `/ready` mostrar hash velho não significa build errado.
 - Pendências operador: **T3** escada nível 5 (6 ou 8?), **T14** token Telegram, registrar watchdog no Task Scheduler (Opção A do WINDOWS_SERVICE.md).
 
+## Stack de agentes reativado (2026-09-14)
+- OpenClaw Gateway **rodando** como serviço (schtasks, pid variável, porta 18789, `openclaw gateway status`/`call health` = ok).
+- OmniRoute já ativo na 20128. OpenCode 1.18.30 validado com chamada real (OpenRouter `north-mini-code:free`).
+- Ralph Loop testado de ponta a ponta no TASK.md da raiz: itens 1 e 2 done com evidência. Item 1 revelou que `.autoclaw/orchestrator/metrics.json` não existe (orquestrador nunca logou). py_compile 4/4 em agent_flow/ + orchestrator importa OK (aviso "Football RAG System não disponível" = modo degradado).
+- Aprendido: opencode com `cwd` explícito enxerga o workspace mapeado em outro caminho (C:\workspace\...) e falha ao editar arquivos; rodar SEM cwd. Agente pode alucinar checkbox — sempre confirmar o arquivo depois.
+- Pendente: importar cron jobs (openclaw-cron-jobs.json.example), Telegram no OpenClaw (token + allowFrom), rodar `run_multi_agent.py` em modo paper p/ gerar metrics.json.
+
 ## Estado atual (fato)
 - Backend: `http://127.0.0.1:8766` (uvicorn, processo solto — SEM serviço ainda).
 - Frontend: app 6 abas (SINAL/MESA/PAPEL/RISCO/BRAIN/MAIS), PWA, sons, holograma scan.
