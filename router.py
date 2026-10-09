@@ -1,7 +1,8 @@
 """Router — LLM via 9Router (primary) com cache + compressão + fallback em cadeia.
 
 Ordem: 9Router (auto: subscription→cheap→free) -> TokenRouter (free) ->
-NVIDIA NIM (free) -> AIsa -> generic slot. OmniRoute legado mantido como alias.
+NVIDIA NIM (free) -> AIsa -> OpenRouter (:free) -> HuggingFace (free c/ token) ->
+generic slot. OmniRoute legado mantido como alias.
 
 Fail-closed: se ninguém responder, erro — nunca inventa saída.
 Tudo fora do PC: 9Router é processo leve local (~150MB) mas a inferência é
@@ -24,8 +25,10 @@ from config import (
     LLM_CACHE_ENABLED, LLM_CACHE_TTL_S, LLM_USAGE_LOG,
     OMNIROUTE_BASE_URL, OMNIROUTE_MODEL, OMNIROUTE_TIMEOUT_S, OMNIROUTE_API_KEY,
     TOKENROUTER_ENABLED, TOKENROUTER_BASE_URL, TOKENROUTER_MODEL, TOKENROUTER_API_KEY,
-    NVIDIA_ENABLED, NVIDIA_BASE_URL, NVIDIA_MODEL, NVIDIA_API_KEY,
-    AISA_ENABLED, AISA_BASE_URL, AISA_MODEL, AISA_API_KEY,
+     NVIDIA_ENABLED, NVIDIA_BASE_URL, NVIDIA_MODEL, NVIDIA_API_KEY,
+     AISA_ENABLED, AISA_BASE_URL, AISA_MODEL, AISA_API_KEY,
+     OPENROUTER_ENABLED, OPENROUTER_BASE_URL, OPENROUTER_MODEL, OPENROUTER_API_KEY,
+     HF_ENABLED, HF_BASE_URL, HF_MODEL, HF_API_KEY,
     GENERIC_PROVIDER_ENABLED, GENERIC_PROVIDER_BASE_URL, GENERIC_PROVIDER_MODEL,
     GENERIC_PROVIDER_API_KEY, GENERIC_PROVIDER_NAME,
     COMPRESSION_ENABLED, COMPRESSION_TARGET_RATIO, COMPRESSION_MIN_CHARS,
@@ -206,7 +209,21 @@ def route_chat(messages: list[dict], temperature: float = 0.2,
         if r:
             return r
 
-    # 5) generic slot (9route ou outro endpoint OpenAI-compatible)
+    # 5) OpenRouter (só modelos ":free" por padrão; chave OPENROUTER_API_KEY)
+    if OPENROUTER_ENABLED and OPENROUTER_API_KEY and OPENROUTER_MODEL:
+        r = _try(f"{OPENROUTER_BASE_URL}/chat/completions",
+                 OPENROUTER_API_KEY, OPENROUTER_MODEL, "openrouter")
+        if r:
+            return r
+
+    # 6) HuggingFace Inference Providers (token free; sem token/modelo = pula)
+    if HF_ENABLED and HF_API_KEY and HF_MODEL:
+        r = _try(f"{HF_BASE_URL}/chat/completions",
+                 HF_API_KEY, HF_MODEL, "huggingface")
+        if r:
+            return r
+
+    # 7) generic slot (9route ou outro endpoint OpenAI-compatible)
     if GENERIC_PROVIDER_ENABLED and GENERIC_PROVIDER_BASE_URL and GENERIC_PROVIDER_MODEL:
         r = _try(f"{GENERIC_PROVIDER_BASE_URL}/v1/chat/completions",
                  GENERIC_PROVIDER_API_KEY, GENERIC_PROVIDER_MODEL,

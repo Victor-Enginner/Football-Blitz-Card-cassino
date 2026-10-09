@@ -120,6 +120,9 @@ def test_signal_anti_streak(tmp_path):
         db.append_event(sid, _fresh_iso(120 - i * 10), o, "authorized_readonly")
     old = server.db
     server.db = db
+    from policy import PolicyEngine
+    old_pol = server.policy
+    server.policy = PolicyEngine(db)
     try:
         r = server.signal_current()
         assert r["signal"] is True and r["side"] == "away"
@@ -127,6 +130,7 @@ def test_signal_anti_streak(tmp_path):
         assert r["run"] == 4 and r["mode"] == "PAPER"
     finally:
         server.db = old
+        server.policy = old_pol
         db.close()
 
 
@@ -181,6 +185,9 @@ def test_signal_carries_operational_metadata(tmp_path):
         db.append_event(sid, _fresh_iso(120 - i * 10), "away", "authorized_readonly")
     old = server.db
     server.db = db
+    from policy import PolicyEngine
+    old_pol = server.policy
+    server.policy = PolicyEngine(db)
     try:
         r = server.signal_current()
         assert r["signal"] is True
@@ -190,6 +197,7 @@ def test_signal_carries_operational_metadata(tmp_path):
         assert r["staleness_seconds"] is not None
     finally:
         server.db = old
+        server.policy = old_pol
         db.close()
 
 
@@ -279,3 +287,46 @@ def test_no_real_bet_endpoint_called():
         if dom in src.lower():
             # viewer link only in web/, never in server.py fetch/post
             assert "requests.post" not in src or dom not in src[src.find("requests.post") - 200:src.find("requests.post") + 200]
+
+
+def test_antifour_backtest_has_no_lookahead():
+    """Regressão do viés encontrado em 14/09: a rodada apostada (i+4) deve
+    estar sempre no futuro do gatilho (i..i+3). Em moeda justa, hit≈0.5."""
+    import random
+    from validate_stats import anti4_hits
+    assert anti4_hits(["home"] * 4 + ["away"]) == (1, 1, 0)
+    assert anti4_hits(["home"] * 5) == (1, 0, 0)
+    assert anti4_hits(["home"] * 4 + ["draw"]) == (0, 0, 1)
+    r = random.Random(7)
+    sg, ht, _ = anti4_hits([r.choice(["home", "away"]) for _ in range(5000)])
+    assert sg > 100 and 0.40 < ht / sg < 0.60
+
+
+def test_auto_paper_opens_one_bet_per_fresh_streak(tmp_path):
+    """Loop automático PAPER: 4x real fresco → 1 aposta paper; repetição não duplica."""
+    from ledger import Ledger
+    from game import GameEngine
+    from policy import PolicyEngine
+    import server
+    db = Ledger(tmp_path / "auto.db")
+    sid = "auto-test-01"
+    db.start_session(sid, state="PAPER")
+    for i, o in enumerate(["home"] * 4):
+        db.append_event(sid, _fresh_iso(120 - i * 10), o, "authorized_readonly")
+    old_db, old_pol, old_game = server.db, server.policy, server.game
+    old_auto = dict(server.AUTO)
+    server.db = db
+    server.policy = PolicyEngine(db)
+    server.game = GameEngine(tmp_path / "auto-paper.db")
+    server.AUTO["enabled"] = True
+    server.AUTO["last_anchor"] = None
+    try:
+        first = server.maybe_auto_paper()
+        assert first and first["bet"]["bet_type"] == "away"
+        assert first["ladder"]["stake"] in [0.5, 1.0, 2.0, 4.0, 6.0, 12.0]
+        assert server.maybe_auto_paper() is None  # mesma âncora: sem duplicata
+    finally:
+        server.db, server.policy, server.game = old_db, old_pol, old_game
+        server.AUTO.clear()
+        server.AUTO.update(old_auto)
+        db.close()

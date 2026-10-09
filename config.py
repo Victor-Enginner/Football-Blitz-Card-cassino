@@ -75,6 +75,22 @@ NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "openai/gpt-oss-20b")
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
 
+# --- OpenRouter (free tier suffix ":free", OpenAI-compatible) ------------------
+OPENROUTER_ENABLED = os.getenv("OPENROUTER_ENABLED", "true").lower() in ("1", "true", "yes")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "cohere/north-mini-code:free")
+OPENROUTER_TIMEOUT_S = float(os.getenv("OPENROUTER_TIMEOUT_S", "60"))
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()  # setx OPENROUTER_API_KEY ...
+
+# --- HuggingFace Inference Providers (free tier com token gratuito) ------------
+# Token free em huggingface.co/settings/tokens → HF_TOKEN; modelos OpenAI-compat
+# via https://router.huggingface.co/v1. Sem token/modelo = etapa ignorada.
+HF_ENABLED = os.getenv("HF_ENABLED", "true").lower() in ("1", "true", "yes")
+HF_BASE_URL = os.getenv("HF_BASE_URL", "https://router.huggingface.co/v1").rstrip("/")
+HF_MODEL = os.getenv("HF_MODEL", "").strip()
+HF_TIMEOUT_S = float(os.getenv("HF_TIMEOUT_S", "60"))
+HF_API_KEY = os.getenv("HF_TOKEN", os.getenv("HUGGINGFACE_API_KEY", "")).strip()
+
 # --- Generic provider slot (for 9route or any verified OpenAI-compatible API) --
 GENERIC_PROVIDER_ENABLED = os.getenv("GENERIC_PROVIDER_ENABLED", "false").lower() in ("1", "true", "yes")
 GENERIC_PROVIDER_BASE_URL = os.getenv("GENERIC_PROVIDER_BASE_URL", "").rstrip("/")

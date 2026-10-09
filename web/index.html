@@ -28,12 +28,15 @@
       <span class="nav-state mono" id="state-pill">OFFLINE</span>
     </div>
     <nav class="tabs" aria-label="Abas">
-      <button class="tab active" data-tab="sinal">◉ SINAL</button>
-      <button class="tab" data-tab="mesa">▦ MESA</button>
-      <button class="tab" data-tab="papel">⛁ PAPEL</button>
-      <button class="tab" data-tab="risco">⚠ RISCO</button>
-      <button class="tab" data-tab="brain">⛨ BRAIN</button>
-      <button class="tab" data-tab="mais">⋯ MAIS</button>
+      <div role="tablist" aria-label="Áreas do Command Center" class="tablist">
+        <button role="tab" aria-selected="true" class="tab active" data-tab="lobby">⌂ INÍCIO</button>
+        <button role="tab" aria-selected="false" class="tab" data-tab="sinal">◉ OPERAÇÃO</button>
+        <button role="tab" aria-selected="false" class="tab" data-tab="mesa">▦ MESA</button>
+        <button role="tab" aria-selected="false" class="tab" data-tab="papel">⛁ PAPEL</button>
+        <button role="tab" aria-selected="false" class="tab" data-tab="risco">⚠ RISCO</button>
+        <button role="tab" aria-selected="false" class="tab" data-tab="brain">⛨ BRAIN</button>
+        <button role="tab" aria-selected="false" class="tab" data-tab="mais">⋯ MAIS</button>
+      </div>
     </nav>
     <div class="top-chips mono">
       <span class="chip" id="top-balance">R$ —</span>
@@ -47,8 +50,53 @@
 
   <main class="app" id="home">
 
+    <!-- ══ RIBBON DE SISTEMA · estado global em uma linha ═══════════════ -->
+    <div class="system-ribbon" id="system-ribbon" data-state="loading" role="status">
+      <span class="ribbon-dot" aria-hidden="true"></span>
+      <span class="ribbon-text" id="ribbon-text">Conectando ao Command Center…</span>
+      <span class="ribbon-meta mono" id="ribbon-meta">—</span>
+    </div>
+
+    <section class="view active lobby" data-view="lobby" aria-label="Central operacional">
+      <div class="lobby-heading"><div><p class="section-label">SEU ESPAÇO DE OPERAÇÃO</p><h1>Visão geral</h1></div><span class="lobby-mode">Observação e simulação</span></div>
+      <div class="lobby-hero">
+        <picture><source srcset="/assets/blitz-capa.webp" type="image/webp"><img src="/assets/blitz-capa.png" alt="Football Blitz" class="lobby-cover" loading="lazy" decoding="async"></picture>
+        <div class="lobby-hero-content"><span class="lobby-eyebrow">FOOTBALL BLITZ · PRAGMATIC PLAY · ZONA DE JOGO</span><div class="lobby-live" id="lobby-live" data-state="idle" role="status"><span class="lobby-live-dot" aria-hidden="true"></span><span id="lobby-live-text">Aguardando captura do observer</span></div><h2>A mesa no centro.<br>O contexto ao seu lado.</h2><p>Acompanhe resultados, explore o histórico e mantenha sua sessão em um só lugar.</p><div class="button-row"><button class="pill-button" data-tab="sinal">Abrir operação ↗</button><button class="ghost-button" data-tab="mesa">Visualizar mesa</button></div></div>
+        <span class="lobby-hero-note">01 / Mesa disponível</span>
+      </div>
+      <div class="lobby-ops" id="lobby-ops" aria-label="Status da operação">
+        <div class="op-cell" id="op-capture" data-state="idle"><small>CAPTURA</small><strong id="op-capture-v">SEM CAPTURA REAL</strong><span id="op-capture-note">Observer não enviou rodadas recentes</span></div>
+        <div class="op-cell"><small>ÚLTIMO RESULTADO</small><strong id="op-last-v">—</strong><span id="op-last-note">Nenhum evento no ledger</span></div>
+        <div class="op-cell"><small>ÚLTIMA RODADA REAL</small><strong id="op-age-v">—</strong><span id="op-age-note">Idade do último evento do observer</span></div>
+        <div class="op-cell"><small>AMOSTRA NA JANELA</small><strong id="op-window-v">0</strong><span id="op-window-note">Rodadas na análise atual</span></div>
+        <div class="op-cell"><small>SINAL</small><strong id="op-signal-v">SEM ENTRADA CONFIRMADA</strong><span id="op-signal-note">Estratégia exige rodadas reais recentes</span></div>
+      </div>
+      <div class="lobby-metrics" aria-label="Resumo do sistema">
+        <div><span>Conexão de eventos</span><strong data-mirror="ws-status-inline">Conectando…</strong><small>Canal de atualização</small></div>
+        <div><span>Sessão atual</span><strong data-mirror="state-pill">OFFLINE</strong><small>Estado informado pelo servidor</small></div>
+        <div><span>Eventos de hoje</span><strong data-mirror="lim-events">—</strong><small>Consumo do limite diário</small></div>
+        <div><span>Resultado simulado</span><strong data-mirror="lim-pnl">—</strong><small>PnL paper · sem dinheiro real</small></div>
+      </div>
+      <div class="lobby-section-heading"><div><p class="section-label">ACESSO DIRETO</p><h2>Sua central de trabalho</h2></div><span class="dim">Uma mesa. Todas as ferramentas.</span></div>
+      <div class="lobby-workspaces">
+        <article class="workspace-card workspace-featured"><div class="workspace-art"><picture><source srcset="/assets/blitz-rodada.webp" type="image/webp"><img src="/assets/blitz-rodada.png" alt="Visual da mesa Football Blitz" loading="lazy" decoding="async"></picture><span>FOOTBALL BLITZ</span></div><div class="workspace-body"><p class="section-label">MESA EM OBSERVAÇÃO</p><h3>Football Blitz</h3><p>Resultados, distribuição e histórico da mesa.</p><div class="workspace-latest"><span>Último resultado</span><strong data-mirror="last-name">—</strong></div><button class="pill-button" data-tab="mesa">Abrir mesa ↗</button></div></article>
+        <article class="workspace-card"><span class="workspace-number">01 / ANÁLISE</span><h3>Centro operacional</h3><p>Registro de resultados, sequência atual e estatísticas no mesmo ambiente.</p><div class="workspace-latest"><span>Amostra carregada</span><strong data-mirror="res-count">—</strong></div><button class="ghost-button" data-tab="sinal">Acompanhar operação ↗</button></article>
+        <article class="workspace-card"><span class="workspace-number">02 / SIMULAÇÃO</span><h3>Laboratório paper</h3><p>Consulte entradas simuladas e acompanhe o resultado da sessão.</p><div class="workspace-latest"><span>Tempo de sessão</span><strong data-mirror="lim-time">—</strong></div><button class="ghost-button" data-tab="papel">Abrir laboratório ↗</button></article>
+        <article class="workspace-card"><span class="workspace-number">03 / CONTROLE</span><h3>Risco e limites</h3><p>Veja as condições de operação e os limites que protegem sua sessão.</p><div class="workspace-latest"><span>Estado da sessão</span><strong data-mirror="state-pill">—</strong></div><button class="ghost-button" data-tab="risco">Consultar limites ↗</button></article>
+      </div>
+      <div class="lobby-bottom"><div><p class="section-label">INTELIGÊNCIA E FERRAMENTAS</p><h3>Investigue com contexto.</h3><p class="dim">Acesse o Brain e as ferramentas disponíveis no Command Center.</p></div><div class="button-row"><button class="ghost-button" data-tab="brain">Abrir Brain ↗</button><button class="ghost-button" data-tab="mais">Todas as ferramentas</button></div></div>
+    </section>
+
     <!-- ══ SINAL ═══════════════════════════════════════════════════════════ -->
-    <section class="view active" data-view="sinal">
+    <section class="view" data-view="sinal">
+      <div class="lobby-heading"><div><p class="section-label">FOOTBALL BLITZ / OPERAÇÃO</p><h1>Centro operacional</h1></div><button class="ghost-button" data-tab="lobby">← Visão geral</button></div>
+      <div class="live-rail" id="live-rail" data-freshness="offline">
+        <div><span class="live-pulse" aria-hidden="true"></span><small>CAPTURA</small><strong id="live-capture">AGUARDANDO</strong></div>
+        <div><small>ÚLTIMO EVENTO</small><strong id="live-age">—</strong></div>
+        <div><small>ORIGEM</small><strong id="live-origin">—</strong></div>
+        <div><small>RELÓGIO LOCAL</small><strong id="live-clock">--:--:--</strong></div>
+        <p id="live-note">Os indicadores abaixo refletem somente eventos registrados no ledger.</p>
+      </div>
       <div class="cols">
         <!-- esquerda: registro + gauges + tendência -->
         <aside class="col side">
@@ -66,7 +114,7 @@
             </div>
           </div>
           <div class="panel">
-            <p class="block-label">◔ GAUGES · ÚLTIMOS 100</p>
+            <p class="block-label">◔ FREQUÊNCIA · ÚLTIMAS <span id="window-size">0</span>/50</p>
             <div class="gauges">
               <div class="gauge"><div class="dial" id="gg-home"><b id="gg-home-v">—</b></div><small>🟡 MAND</small></div>
               <div class="gauge"><div class="dial" id="gg-away"><b id="gg-away-v">—</b></div><small>🔵 VISI</small></div>
@@ -90,6 +138,11 @@
             <p class="block-label">📜 HISTÓRICO DE SINAIS</p>
             <div id="signals-mini" class="sigs-mini"><span class="dim">—</span></div>
           </div>
+          <div class="panel strategy-watch">
+            <p class="block-label">◇ LEITURAS EM OBSERVAÇÃO</p>
+            <div id="strategy-observations" class="strategy-observations"><span class="dim">Amostra insuficiente.</span></div>
+            <p class="disclaimer">Padrões históricos para estudo. Não representam previsão da próxima rodada.</p>
+          </div>
         </aside>
 
         <!-- centro: sinal + orbes -->
@@ -107,10 +160,29 @@
               <button class="ghost-button" id="btn-auto-paper" title="Liga/desliga entradas paper automáticas (simulação)">AUTO: OFF</button>
             </div>
           </div>
+          <div class="signal-meta" id="signal-meta" data-state="idle">
+            <div><small>ESTRATÉGIA</small><strong id="sig-rule">—</strong></div>
+            <div><small>AMOSTRA REAL</small><strong id="sig-sample">—</strong></div>
+            <div><small>CONFIANÇA</small><strong id="sig-confidence">—</strong></div>
+            <div><small>CALCULADO</small><strong id="sig-computed">—</strong></div>
+            <div><small>VÁLIDO ATÉ</small><strong id="sig-valid">—</strong></div>
+            <div><small>STATUS</small><strong id="sig-status">SEM ENTRADA CONFIRMADA</strong></div>
+          </div>
+          <p class="disclaimer signal-cancel" id="signal-cancel" hidden></p>
           <div class="panel">
             <p class="block-label">● ÚLTIMO RESULTADO</p>
             <div class="last-result"><span id="last-orb" class="signal-orb">–</span>
               <div><h3 id="last-name">—</h3><p class="dim mono" id="last-time">—</p></div>
+            </div>
+          </div>
+          <div class="panel window-analysis">
+            <div class="analysis-head"><p class="block-label">ANÁLISE DA JANELA · 50</p><span id="analysis-confidence">SEM AMOSTRA</span></div>
+            <div class="analysis-primary"><span>Maior frequência observada</span><strong id="analysis-leader">—</strong><small id="analysis-leader-detail">Aguardando resultados.</small></div>
+            <div class="analysis-grid">
+              <div><small>Alternâncias</small><strong id="analysis-switches">—</strong></div>
+              <div><small>Maior sequência</small><strong id="analysis-max-run">—</strong></div>
+              <div><small>Rodadas/min</small><strong id="analysis-cadence">—</strong></div>
+              <div><small>Eventos reais</small><strong id="analysis-real">—</strong></div>
             </div>
           </div>
           <div class="panel limit-panel">
@@ -126,8 +198,8 @@
         <!-- direita: resultados + estatística -->
         <aside class="col side">
           <div class="panel">
-            <p class="block-label">◷ RESULTADOS (<span id="res-count">0</span>)</p>
-            <div class="pct-row"><span>🟡 <b id="pct-home">—</b></span><span>🔵 <b id="pct-away">—</b></span><span>🟢 <b id="pct-draw">—</b></span></div>
+            <p class="block-label">◷ ÚLTIMOS RESULTADOS (<span id="res-count">0</span>/50)</p>
+            <div class="pct-row"><span>🟡 <b id="pct-home">—</b><small id="count-home">0×</small></span><span>🔵 <b id="pct-away">—</b><small id="count-away">0×</small></span><span>🟢 <b id="pct-draw">—</b><small id="count-draw">0×</small></span></div>
             <div class="pct-bars"><i id="pb-home"></i><i id="pb-away"></i><i id="pb-draw"></i></div>
             <div class="results-grid" id="results-grid" aria-label="Grade de resultados"></div>
           </div>
@@ -138,6 +210,10 @@
             <div class="limit-row"><span>Sequência atual</span><strong class="mono" id="st-streak">—</strong></div>
             <p class="block-label">🔥 LADOS QUENTES</p>
             <div id="hot-sides" class="hot"></div>
+          </div>
+          <div class="panel ops-chronicle">
+            <div class="analysis-head"><p class="block-label">● TIMELINE AO VIVO</p><span id="ops-timeline-count">0 EVENTOS</span></div>
+            <div id="ops-timeline" class="timeline compact"></div>
           </div>
         </aside>
       </div>
@@ -161,9 +237,22 @@
       </div>
       <p id="viewer-status" class="dim" role="status">Visualização externa pausada.</p>
       <button type="button" class="ghost-button" id="viewer-close" hidden>Fechar jogo</button>
+      <div class="panel window-analysis">
+        <div class="analysis-head"><p class="block-label">ANÁLISE DA JANELA · 50</p><span data-mirror="analysis-confidence">SEM AMOSTRA</span></div>
+        <div class="analysis-primary"><span>Resultado mais frequente</span><strong data-mirror="analysis-leader">—</strong><small data-mirror="analysis-leader-detail">Aguardando resultados.</small></div>
+        <div class="analysis-grid">
+          <div><small>Amostra na janela</small><strong data-mirror="res-count">0</strong></div>
+          <div><small>Sequência atual</small><strong data-mirror="st-streak">—</strong></div>
+          <div><small>Maior sequência</small><strong data-mirror="analysis-max-run">—</strong></div>
+          <div><small>Trocas de resultado</small><strong data-mirror="analysis-switches">—</strong></div>
+          <div><small>Rodadas/min</small><strong data-mirror="analysis-cadence">—</strong></div>
+          <div><small>Reais / total</small><strong data-mirror="analysis-real">—</strong></div>
+        </div>
+        <p class="disclaimer" id="mesa-data-note">Sem dados suficientes — a análise usa somente eventos registrados no ledger.</p>
+      </div>
       <div class="panel">
-        <p class="block-label">● CHRONICLE <span class="mono dim" id="timeline-counter">0 EVENTS</span></p>
-        <div id="timeline" class="timeline"></div>
+        <div class="analysis-head"><p class="block-label">● CHRONICLE <span class="mono dim" id="timeline-counter">0 EVENTS</span></p><span class="tl-status" id="timeline-status" data-state="idle">AGUARDANDO EVENTOS</span></div>
+        <div id="timeline" class="timeline" aria-live="polite"></div>
       </div>
       <div class="panel">
         <p class="block-label">▤ DISTRIBUIÇÃO</p>
@@ -339,21 +428,23 @@
   </main>
 
   <!-- tabbar mobile -->
-  <nav class="tabbar" aria-label="Navegação">
-    <button class="active" data-tab="sinal">◉<small>SINAL</small></button>
-    <button data-tab="mesa">▦<small>MESA</small></button>
-    <button data-tab="papel">⛁<small>PAPEL</small></button>
-    <button data-tab="risco">⚠<small>RISCO</small></button>
-    <button data-tab="brain">⛨<small>BRAIN</small></button>
-    <button data-tab="mais">⋯<small>MAIS</small></button>
+  <nav class="tabbar" aria-label="Navegação mobile">
+    <button aria-label="Operação" class="active" data-tab="sinal">◉<small>SINAL</small></button>
+    <button aria-label="Mesa" data-tab="mesa">▦<small>MESA</small></button>
+    <button aria-label="Papel" data-tab="papel">⛁<small>PAPEL</small></button>
+    <button aria-label="Risco" data-tab="risco">⚠<small>RISCO</small></button>
+    <button aria-label="Brain" data-tab="brain">⛨<small>BRAIN</small></button>
+    <button aria-label="Mais" data-tab="mais">⋯<small>MAIS</small></button>
   </nav>
 
   <div id="toast" role="status" aria-live="polite"></div>
-  <!-- holograma scan · cartas do giro exato -->
-  <div id="hologram" class="hologram" aria-live="polite" title="Cartas observadas no giro">
-    <span class="holo-label">SCAN</span>
-    <span class="holo-cards"><b id="holo-home">–</b><i>×</i><b id="holo-away">–</b></span>
-    <span class="holo-out" id="holo-out">—</span>
+  <!-- dock da rodada · recebe cartas apenas do observer autorizado -->
+  <div id="hologram" class="hologram" data-state="waiting" aria-live="polite" title="Rodada atual do Football Blitz">
+    <div class="holo-head"><span class="holo-label">RODADA ATUAL</span><span class="holo-status" id="holo-status">AGUARDANDO CARTAS</span></div>
+    <div class="holo-main"><span class="holo-cards"><b id="holo-home">–</b><i>×</i><b id="holo-away">–</b></span><span class="holo-out" id="holo-out">—</span></div>
+    <div class="holo-detail" id="holo-detail">Abra o Football Blitz para iniciar a captura.</div>
+    <div class="holo-tags"><span id="holo-origin" class="holo-origin">ORIGEM: —</span><span id="holo-conf" class="holo-conf">—</span></div>
+    <div class="holo-footer"><span id="holo-signal">SINAL: AGUARDANDO AMOSTRA</span><span id="holo-time">--:--:--</span></div>
   </div>
   <div id="signal-popup" class="signal-popup" hidden role="alertdialog" aria-label="Sinal">
     <div class="signal-popup-box">

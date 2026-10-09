@@ -80,8 +80,18 @@ function toast(msg, kind = "green") {
 }
 
 /* ── api helpers ──────────────────────────────────────────────────────────── */
+const API_TIMEOUT_MS = 8000;
 async function api(path, opts) {
-  const res = await fetch(path, opts);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(path, { ...(opts || {}), signal: ctrl.signal });
+  } catch (e) {
+    throw new Error(e && e.name === "AbortError" ? "tempo esgotado (8s)" : (e.message || String(e)));
+  } finally {
+    clearTimeout(timer);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const detail = data.detail;
@@ -653,7 +663,7 @@ async function refreshCards() {
     const order = Object.entries(c.counts).sort((x, y) => y[1] - x[1]);
     const mx = Math.max(1, ...order.map((x) => x[1]));
     $("cards-dist").innerHTML = order.map(([k, v]) =>
-      `<div class="hot-row"><span>🂡 ${escapeHtml(k)}</span><div class="hbar"><i style="width:${(v / mx) * 100}%;background:#7dd3fc"></i></div><b>${v}</b></div>`
+      `<div class="hot-row"><span>🂡 ${escapeHtml(k)}</span><div class="hbar"><i style="width:${(v / mx) * 100}%;background:var(--info)"></i></div><b>${v}</b></div>`
     ).join("") || "<span class='dim'>Sem cartas capturadas ainda —</span>";
     if (c.note) $("cards-note").textContent = c.note;
   } catch { /* sem cartas se offline */ }
@@ -767,9 +777,9 @@ async function refreshBoard() {
     $("pb-home").style.width = pc("home") * 100 + "%";
     $("pb-away").style.width = pc("away") * 100 + "%";
     $("pb-draw").style.width = pc("draw") * 100 + "%";
-    dialPct("gg-home", pc("home"), "#f5c518"); $("gg-home-v").textContent = (pc("home") * 100).toFixed(0) + "%";
-    dialPct("gg-away", pc("away"), "#4da3ff"); $("gg-away-v").textContent = (pc("away") * 100).toFixed(0) + "%";
-    dialPct("gg-draw", pc("draw"), "#35d07f"); $("gg-draw-v").textContent = (pc("draw") * 100).toFixed(0) + "%";
+    dialPct("gg-home", pc("home"), "var(--home)"); $("gg-home-v").textContent = (pc("home") * 100).toFixed(0) + "%";
+    dialPct("gg-away", pc("away"), "var(--away)"); $("gg-away-v").textContent = (pc("away") * 100).toFixed(0) + "%";
+    dialPct("gg-draw", pc("draw"), "var(--draw)"); $("gg-draw-v").textContent = (pc("draw") * 100).toFixed(0) + "%";
     /* último */
     if (evs.length) {
       const last = evs[evs.length - 1], pt = ptOutcome(last.outcome);
@@ -817,7 +827,7 @@ async function refreshBoard() {
     const order = ["home", "away", "draw"].sort((a, b) => c[b] - c[a]);
     const mx = Math.max(1, ...order.map((k) => c[k]));
     $("hot-sides").innerHTML = order.map((k) => {
-      const pt = ptOutcome(k), col = k === "home" ? "#f5c518" : k === "away" ? "#4da3ff" : "#35d07f";
+      const pt = ptOutcome(k), col = k === "home" ? "var(--home)" : k === "away" ? "var(--away)" : "var(--draw)";
       return `<div class="hot-row"><span>${pt.emoji} ${pt.name}</span><div class="hbar"><i style="width:${(c[k] / mx) * 100}%;background:${col}"></i></div><b>${c[k]}</b></div>`;
     }).join("");
     /* análise descritiva da janela: sem transformar frequência em previsão */
@@ -858,7 +868,7 @@ async function refreshBoard() {
     const pc2 = $("play-chips");
     if (pendingSignal) {
       const pt = ptOutcome(pendingSignal.side);
-      pc2.innerHTML = `<button class="play-chip" id="play-chip-btn" style="border-color:${pendingSignal.side === "home" ? "#f5c518" : pendingSignal.side === "away" ? "#4da3ff" : "#35d07f"}">${pt.emoji} ${pt.name} R$ ${pendingSignal.stake.toFixed(2)}</button>`;
+      pc2.innerHTML = `<button class="play-chip" id="play-chip-btn" style="border-color:${pendingSignal.side === "home" ? "var(--home)" : pendingSignal.side === "away" ? "var(--away)" : "var(--draw)"}">${pt.emoji} ${pt.name} R$ ${pendingSignal.stake.toFixed(2)}</button>`;
       $("play-chip-btn").addEventListener("click", confirmSignal);
     } else pc2.innerHTML = "<span class='dim'>Sem sinal —</span>";
     /* sinais mini (paper recentes) */

@@ -1,0 +1,9 @@
+gates:
+  build: { required: true }
+  py_compile: { required: true }
+  unit: { required: true }
+  js_check: { required: true }
+  architecture: { required: true, ratchet: true, message: "PAPER-only: nenhuma rota pode conter execute_bet/place_bet/auto_click" }
+  security_sast: { required: true, fail_on: [high, critical] }
+  test_deletion: { required: true, block_if_tests_removed_without_label: "tests-removed-approved" }
+messages: { style: actionable }

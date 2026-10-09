@@ -178,6 +178,10 @@ class Copilot:
             "latency_ms": result.get("latency_ms"),
             "compression": comp_report,
         }
+        # Defesa em profundidade: redigir padrões de segredo mesmo na saída válida
+        # (o modelo nunca recebe segredos no contexto, mas eco deve sair mascarado).
+        validated["summary"] = _redact(validated["summary"])
+        validated["observations"] = [_redact(x) for x in validated["observations"]]
         return validated
 
     @staticmethod

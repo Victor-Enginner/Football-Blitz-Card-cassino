@@ -9,6 +9,7 @@ Security/governance invariants enforced here:
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -230,6 +231,10 @@ def version():
 # Sinal é visual/educacional — nunca aposta sozinho.
 ANTI_STREAK_RUN = 4
 
+# Teto de apostas PAPER/dia (governança): separado de FB_MAX_EVENTS_PER_DAY
+# (eventos observados). Padrão 200 preserva o comportamento anterior.
+MAX_BETS_PER_DAY = int(os.getenv("FB_MAX_BETS_PER_DAY", "200"))
+
 
 def ladder_now() -> dict:
     """Current ladder position from consecutive settled paper results (newest first)."""
@@ -275,9 +280,9 @@ def maybe_auto_paper() -> dict | None:
         today = datetime.now(timezone.utc).date().isoformat()
         today_bets = [b for b in game.recent_bets(500)
                       if (b.get("opened_at", "")[:10] == today)]
-        if len(today_bets) >= 200:
+        if len(today_bets) >= MAX_BETS_PER_DAY:
             AUTO["enabled"] = False
-            db.audit("auto_paper", "limite 200/dia: auto-paper DESLIGADO")
+            db.audit("auto_paper", f"limite {MAX_BETS_PER_DAY}/dia: auto-paper DESLIGADO")
             return None
         # conta perdas consecutivas (para no 1º win/push)
         consec = 0

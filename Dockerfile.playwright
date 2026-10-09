@@ -1,0 +1,8 @@
+FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt && playwright install --with-deps chromium
+COPY . .
+EXPOSE 8766
+CMD ["python", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8766"]
+# observer headless: python -m playwright install + node harness/observer-playwright.js
